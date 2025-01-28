@@ -145,6 +145,29 @@ async def RoundTable(ctx, length: float=5.):
     await countdown_message.edit(content="⏰ Time's up!")
     await channel.send("The time for talk is now over. ")
 
+# Murder selections
+async def victim_select_callback(interaction: discord.Interaction, view):
+    victim_select=None
+    for item in view.children:
+        if item.custom_id=="victim_select":
+            victim_select=item
+    if not victim_select:
+        await interaction.response.send_message(embed=discord.Embed(
+            title="Failed to select victim.",
+            description="Ask for help by using the `/help` command.",
+            color=discord.Color.red()
+            ))
+        return 
+        
+    victim_select.disabled = True
+    await interaction.message.edit(view=view)
+
+    victims = victim_select.values  # The selected user ID
+    await interaction.response.send_message(f"You have made your selection. **{', '.join(victims)}** will no longer be with us.")
+    instructions_channel = client.get_channel(constants.instructions_channel_id)
+    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    await instructions_channel.send(embed=discord.Embed(title="The traitors have struck again!", description=f"**{', '.join(victims)}** {"are" if len(victims)>1 else "is"} dead.", color=discord.Color.red()) )
+
 @tree.command(
     name="murder_instructions",
     description="Send instructions to murder",
@@ -156,11 +179,17 @@ async def MurderInstructions(ctx, num_victims:int = 1):
     main_guild = client.get_guild(constants.main_guild)
     traitors_only_guild = client.get_guild(constants.traitors_only_guild)
     # members = [member for member in main_guild.members if member not in traitors_only_guild.members]
-    members = [member for member in main_guild.members ]
+    members =  main_guild.members
     user_options = [discord.SelectOption(label=member.display_name, value=member.display_name) for member in members]
-    select = Select(placeholder="Select an option", options=user_options, max_values=num_victims, min_values=num_victims)
+    victim_select = Select(
+        custom_id="victim_select",
+        placeholder="Select an option",
+        options=user_options,
+        max_values=num_victims,
+        min_values=num_victims
+        )
     view = View()
-    view.add_item(select)
+    view.add_item(victim_select)
     await traitors_channel.send(
         embed=discord.Embed(
             title="Time to murder",
@@ -170,17 +199,8 @@ async def MurderInstructions(ctx, num_victims:int = 1):
         )
     await traitors_channel.send(f"Select {"a" if num_victims==1 else num_victims} player{"s" if num_victims > 1 else ""} to murder:", view=view)
 
-    async def select_callback(interaction: discord.Interaction, view=view):
-        select.disabled = True
-        await interaction.message.edit(view=view)
-
-        victims = select.values  # The selected user ID
-        await interaction.response.send_message(f"You have made your selection. **{', '.join(victims)}** will no longer be with us.")
-        instructions_channel = client.get_channel(constants.instructions_channel_id)
-        traitors_channel = client.get_channel(constants.traitors_channel_id)
-        await instructions_channel.send(embed=discord.Embed(title="A murder has been committed!", description=f"**{', '.join(victims)}** {"are" if len(victims)>1 else "is"} dead.", color=discord.Color.red()) )
     
-    select.callback = select_callback
+    victim_select.callback = lambda ctx: victim_select_callback(ctx, view)
     await ctx.response.send_message("Murder instructions sent.")
 
 @tree.command(
