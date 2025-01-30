@@ -57,33 +57,46 @@ async def Test(ctx: discord.Interaction, length: float=5.):
         color=discord.Color.green()
     ))
 
+def CountdownMessage(sec_left: int, length_sec:int) -> discord.Embed:
+    minutes, seconds = (length_sec//60, length_sec%60)
+    length_string=f"{f"{minutes} minute{"s" if minutes > 1 else ""}" if minutes > 0 else ""}{" and " if minutes > 0 and seconds > 0 else ""}{f"{seconds} second{"s" if seconds > 1 else ""}" if seconds > 0 else ""}"
+
+    minutes, seconds = (sec_left//60, sec_left%60)
+    if sec_left == 0:
+        return discord.Embed(
+            title="Round Table",
+            description=f"Players, welcome to the round table. This is your only oppurtunity to strike back at the traitors. You have {length_string}. Good luck.\n⏰ Time's up!",
+            color=discord.Color.red()
+        )
+
+    return discord.Embed(
+        title="Round Table",
+        description=f"Players, welcome to the round table. This is your only oppurtunity to strike back at the traitors. You have {length_string}. Good luck.\n⏳ Time left: {minutes}:{seconds:02}",
+        color=discord.Color.purple()
+    )
+    
 @tree.command(
     name="round_table",
     description="Initiate a round table",
     guild=discord.Object(id=constants.control_guild)
 )
-async def RoundTable(ctx, length: float=5.):
-    length=math.floor(length*60)
-    if length <= 0:
+async def RoundTable(ctx, length_min: float=5.):
+    length_sec=math.floor(length_min*60)
+    if length_sec <= 0:
       await channel.send("The countdown must be longer than 0 seconds!")
       return
 
     channel = client.get_channel(constants.instructions_channel_id)
-    await ctx.response.send_message(f"Starting round table for {length} seconds.")
-    await channel.send("Players, welcome to the round table. This is your only oppurtunity to strike back at the traitors. You have five minutes. Good luck.")
-    MinutesSeconds= lambda seconds: (seconds//60, seconds%60)
+    await ctx.response.send_message(f"Starting round table for {length_sec} seconds")
+    
+    sec_left=length_sec
+    countdown_message=await channel.send(embed=CountdownMessage(sec_left, length_sec))
 
-    minutes, seconds = MinutesSeconds(length)
-
-    countdown_message = await channel.send(f"⏳ Time left: {minutes}:{seconds:02}")
-
-    while length > 0:
-        length -= 1
-        minutes, seconds = MinutesSeconds(length)
-        await countdown_message.edit(content=f"⏳ Time left: {minutes}:{seconds:02}")
+    while sec_left > 0:
+        sec_left -= 1
+        await countdown_message.edit(embed=CountdownMessage(sec_left, length_sec))
         await asyncio.sleep(1)
 
-    await countdown_message.edit(content="⏰ Time's up!")
     await channel.send("The time for talk is now over. ")
 
 
@@ -300,11 +313,18 @@ async def RecruitDecideCallback(interaction: discord.Interaction, view):
     guild=discord.Object(id=constants.control_guild)
 )
 async def Recruit(ctx, force:bool = False):
+    traitors_channel = client.get_channel(constants.traitors_channel_id)
     if force:
+        await traitors_channel.send(
+            embed=discord.Embed(
+                title="You must now recruit.",
+                description="Traitors, you may now add to your ranks. Choose carefully.",
+                color=discord.Color.purple()
+                ),
+            )
         await InitiateRecruit(force=True)
         await ctx.response.send_message("Recruit initiated.")
         return
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
     user_options = [
         discord.SelectOption(label="yes", value="yes"),
         discord.SelectOption(label="no", value="no")
@@ -330,7 +350,7 @@ async def Recruit(ctx, force:bool = False):
     await ctx.response.send_message("Recruit initiated.")
     
 # Murder selections
-async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view):
+async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view, num_players:int, num_victims:int):
     deathmatch_victim_select=None
     for item in view.children:
         if item.custom_id=="deathmatch_victim_select":
@@ -352,8 +372,8 @@ async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view)
     instructions_channel = client.get_channel(constants.instructions_channel_id)
     traitors_channel = client.get_channel(constants.traitors_channel_id)
     await instructions_channel.send(embed=discord.Embed(
-        title="The traitors have struck again!",
-        description=f"**{victims_string}** have been sent to the Death Match.",
+        title="The traitors have thought of a new way to torture you",
+        description=f"**{victims_string}** have been selected for a Death Match. Only {num2words(num_players - num_victims)} will survive.",
         color=discord.Color.red()
         ))
 
@@ -389,7 +409,7 @@ async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
     await traitors_channel.send(f"Select {num_players} players to send to the Death Match:", view=view)
 
     
-    deathmatch_victim_select.callback = lambda ctx: DeathmatchVictimSelectCallback(ctx, view)
+    deathmatch_victim_select.callback = lambda ctx: DeathmatchVictimSelectCallback(ctx, view, num_players, num_victims)
     await ctx.response.send_message("Death Match initiated")
 
 # \Control Commands ---------------------------------------------------------------------------------------------------------------------------
