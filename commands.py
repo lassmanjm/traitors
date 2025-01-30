@@ -2,7 +2,6 @@ import discord
 import constants
 from discord import app_commands
 from discord.ui import Select, View
-import time
 import asyncio
 import math
 from num2words import num2words
