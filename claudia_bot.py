@@ -1,10 +1,21 @@
 import discord
-import constants
 from discord import app_commands
 from discord.ui import Select, View
 import asyncio
 import math
 from num2words import num2words
+import os
+
+bot_token=os.environ['TRAITORS_BOT_TOKEN']
+
+instructions_channel_id=int(os.environ['TRAITORS_INSTRUCTIONS_CHANNEL_ID'])
+traitors_channel_id=int(os.environ['TRAITORS_TRAITORS_CHANNEL_ID'])
+control_channel_id=int(os.environ['TRAITORS_CONTROL_CHANNEL_ID'])
+
+main_guild_id=int(os.environ['TRAITORS_MAIN_GUILD_ID'])
+traitors_only_guild_id=int(os.environ['TRAITORS_TRAITORS_ONLY_GUILD_ID'])
+control_guild_id=int(os.environ['TRAITORS_CONTROL_GUILD_ID'])
+
 
 intents = discord.Intents.default()
 intents.members = True
@@ -26,20 +37,20 @@ def DisplayVictims(victims: list[str]):
 @tree.command(
     name="help",
     description="Ask anonymous questions to the group",
-    guild=discord.Object(id=constants.traitors_only_guild)
+    guild=discord.Object(id=traitors_only_guild_id)
 )
 async def help(interaction, problem: str):
-    instructions_channel = client.get_channel(constants.instructions_channel_id)
+    instructions_channel = client.get_channel(instructions_channel_id)
     await interaction.response.send_message("Help requested!")
     await instructions_channel.send(embed=discord.Embed(title="Anonymous help requested!", description=problem, color=discord.Color.pink()) )
 
 @tree.command(
     name="anonymous",
     description="Communicate anonymously with the group",
-    guild=discord.Object(id=constants.traitors_only_guild)
+    guild=discord.Object(id=traitors_only_guild_id)
 )
 async def help(interaction, message: str):
-    instructions_channel = client.get_channel(constants.instructions_channel_id)
+    instructions_channel = client.get_channel(instructions_channel_id)
     await interaction.response.send_message("Message sent")
     await instructions_channel.send(embed=discord.Embed(title="Anonymous communication", description=message, color=discord.Color.dark_purple()) )
 # \Traitor commands ---------------------------------------------------------------------------------------------------------------------------
@@ -48,7 +59,7 @@ async def help(interaction, message: str):
 @tree.command(
     name="test",
     description="Test the bot",
-    guild=discord.Object(id=constants.control_guild)
+    guild=discord.Object(id=control_guild_id)
 )
 async def Test(ctx: discord.Interaction, length: float=5.):
     await ctx.response.send_message(embed=discord.Embed(
@@ -78,7 +89,7 @@ def CountdownMessage(sec_left: int, length_sec:int) -> discord.Embed:
 @tree.command(
     name="round_table",
     description="Initiate a round table",
-    guild=discord.Object(id=constants.control_guild)
+    guild=discord.Object(id=control_guild_id)
 )
 async def RoundTable(ctx, length_min: float=5.):
     length_sec=math.floor(length_min*60)
@@ -86,7 +97,7 @@ async def RoundTable(ctx, length_min: float=5.):
       await channel.send("The countdown must be longer than 0 seconds!")
       return
 
-    channel = client.get_channel(constants.instructions_channel_id)
+    channel = client.get_channel(instructions_channel_id)
     await ctx.response.send_message(f"Starting round table for {length_sec} seconds")
     
     sec_left=length_sec
@@ -101,7 +112,7 @@ async def RoundTable(ctx, length_min: float=5.):
 
 
 async def Kill(victims):
-    instructions_channel = client.get_channel(constants.instructions_channel_id)
+    instructions_channel = client.get_channel(instructions_channel_id)
     await instructions_channel.send(embed=discord.Embed(title="The traitors have struck again!", description=f"**{DisplayVictims([victim.display_name for victim in victims])}** {"are" if len(victims)>1 else "is"} dead.", color=discord.Color.red()) )
 # Murder selections
 async def victim_select_callback(interaction: discord.Interaction, view):
@@ -127,13 +138,13 @@ async def victim_select_callback(interaction: discord.Interaction, view):
 @tree.command(
     name="murder",
     description="Send instructions to murder",
-    guild=discord.Object(id=constants.control_guild)
+    guild=discord.Object(id=control_guild_id)
 )
 async def Murder(ctx, num_victims:int = 1):
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    traitors_channel = client.get_channel(traitors_channel_id)
 
-    main_guild = client.get_guild(constants.main_guild)
-    traitors_only_guild = client.get_guild(constants.traitors_only_guild)
+    main_guild = client.get_guild(main_guild_id)
+    traitors_only_guild = client.get_guild(traitors_only_guild_id)
     members = [member for member in main_guild.members if member not in traitors_only_guild.members]
     user_options = [discord.SelectOption(label=member.display_name, value=member.id) for member in members]
     victim_select = Select(
@@ -159,7 +170,7 @@ async def Murder(ctx, num_victims:int = 1):
     await ctx.response.send_message("Murder initiated.")
 
 async def RecruitComplete():
-    await client.get_channel(constants.control_channel_id).send(embed=discord.Embed(
+    await client.get_channel(control_channel_id).send(embed=discord.Embed(
         title="Recruitment Complete",
         description="The traitors have finished recruiting.",
         color=discord.Color.green()
@@ -176,7 +187,7 @@ async def RecruitResponseCallback(interaction: discord.Interaction, view, select
     await interaction.message.edit(view=view)
 
     accept = recruit_response.values[0] == "yes"
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    traitors_channel = client.get_channel(traitors_channel_id)
 
     if accept:
         invite = await traitors_channel.create_invite(max_uses=1) 
@@ -253,7 +264,7 @@ async def RecruitSelectCallback(interaction: discord.Interaction, view, force:bo
         recruit_response.callback = lambda ctx: RecruitResponseCallback(ctx, view, selected_recruit, force)
 
     else:
-        traitors_channel = client.get_channel(constants.traitors_channel_id)
+        traitors_channel = client.get_channel(traitors_channel_id)
         await traitors_channel.send(embed=discord.Embed(
             title="Recruitment Error! ",
             description="User not found. Ask for help with the `/help` command.",
@@ -263,10 +274,10 @@ async def RecruitSelectCallback(interaction: discord.Interaction, view, force:bo
 
 
 async def InitiateRecruit(force:bool=False):
-    traitors_channel=client.get_channel(constants.traitors_channel_id)
+    traitors_channel=client.get_channel(traitors_channel_id)
 
-    main_guild = client.get_guild(constants.main_guild)
-    traitors_only_guild = client.get_guild(constants.traitors_only_guild)
+    main_guild = client.get_guild(main_guild_id)
+    traitors_only_guild = client.get_guild(traitors_only_guild_id)
     members = [member for member in main_guild.members if member not in traitors_only_guild.members]
     user_options = [discord.SelectOption(label=member.display_name, value=member.id) for member in members]
     recruit_select = Select(
@@ -310,10 +321,10 @@ async def RecruitDecideCallback(interaction: discord.Interaction, view):
 @tree.command(
     name="recruit",
     description="Send instructions to recruit",
-    guild=discord.Object(id=constants.control_guild)
+    guild=discord.Object(id=control_guild_id)
 )
 async def Recruit(ctx, force:bool = False):
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    traitors_channel = client.get_channel(traitors_channel_id)
     if force:
         await traitors_channel.send(
             embed=discord.Embed(
@@ -369,8 +380,8 @@ async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view,
     deathmatch_victims = [client.get_user(int(victim)).display_name for victim in deathmatch_victim_select.values]
     victims_string=DisplayVictims(deathmatch_victims)
     await interaction.response.send_message(f"You have made your selection. **{victims_string}** will be sent to the deathmatch.")
-    instructions_channel = client.get_channel(constants.instructions_channel_id)
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    instructions_channel = client.get_channel(instructions_channel_id)
+    traitors_channel = client.get_channel(traitors_channel_id)
     await instructions_channel.send(embed=discord.Embed(
         title="The traitors have thought of a new way to torture you",
         description=f"**{victims_string}** have been selected for a Death Match. Only {num2words(num_players - num_victims)} will survive.",
@@ -380,12 +391,12 @@ async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view,
 @tree.command(
     name="deathmatch",
     description="Send instructions for deathmatch",
-    guild=discord.Object(id=constants.control_guild)
+    guild=discord.Object(id=control_guild_id)
 )
 async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
-    traitors_channel = client.get_channel(constants.traitors_channel_id)
+    traitors_channel = client.get_channel(traitors_channel_id)
 
-    main_guild = client.get_guild(constants.main_guild)
+    main_guild = client.get_guild(main_guild_id)
     members = main_guild.members
     user_options = [ discord.SelectOption(label=member.display_name, value=member.id) 
                     for member in main_guild.members 
@@ -419,7 +430,7 @@ async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
 @tree.command(
     name="dm_test",
     description="Test DM all players.",
-    guild=discord.Object(id=constants.main_guild)
+    guild=discord.Object(id=main_guild_id)
 )
 async def DmTest(ctx):
     # Get the guild (server) the command was called from
@@ -453,10 +464,10 @@ async def DmTest(ctx):
 
 @client.event
 async def on_ready():
-    await tree.sync(guild=discord.Object(id=constants.traitors_only_guild))
-    await tree.sync(guild=discord.Object(id=constants.control_guild))
-    await tree.sync(guild=discord.Object(id=constants.main_guild))
+    await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
+    await tree.sync(guild=discord.Object(id=control_guild_id))
+    await tree.sync(guild=discord.Object(id=main_guild_id))
     print(f'Logged in as {client.user}: commands')
 
-client.run(constants.bot_token)
+client.run(bot_token)
 
