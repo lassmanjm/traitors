@@ -42,9 +42,9 @@ def DisplayVictims(victims: list[str]):
     description="Ask anonymous questions to the group",
     guild=discord.Object(id=traitors_only_guild_id)
 )
-async def help(interaction, problem: str):
+async def help(interaction:discord.Interaction, problem: str):
     instructions_channel = client.get_channel(instructions_channel_id)
-    await interaction.response.send_message("Help requested!")
+    await interaction.response.send_message("Help requested!", ephemeral=True)
     await instructions_channel.send(embed=discord.Embed(title="Anonymous help requested!", description=problem, color=discord.Color.pink()) )
 
 @tree.command(
@@ -52,9 +52,9 @@ async def help(interaction, problem: str):
     description="Communicate anonymously with the group",
     guild=discord.Object(id=traitors_only_guild_id)
 )
-async def help(interaction, message: str):
+async def help(interaction:discord.Interaction, message: str):
     instructions_channel = client.get_channel(instructions_channel_id)
-    await interaction.response.send_message("Message sent")
+    await interaction.response.send_message("Message sent", ephemeral=True)
     await instructions_channel.send(embed=discord.Embed(title="Anonymous communication", description=message, color=discord.Color.dark_purple()) )
 # \Traitor commands ---------------------------------------------------------------------------------------------------------------------------
 
