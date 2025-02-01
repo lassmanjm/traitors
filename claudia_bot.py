@@ -423,6 +423,18 @@ async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
     deathmatch_victim_select.callback = lambda ctx: DeathmatchVictimSelectCallback(ctx, view, num_players, num_victims)
     await ctx.response.send_message("Death Match initiated")
 
+@tree.command(
+    name="delete_messsages",
+    description="Delete messages in channel",
+)
+async def DeleteMessages(ctx, limit:int=None):
+    if limit is None:
+        await ctx.response.send_message("You must provide the number of messages to delete")
+    else:
+        await ctx.response.send_message(f"Deleting {limit} messages...", delete_after=2)  # Auto-delete the confirmation message
+        await asyncio.sleep(3)
+        await ctx.channel.purge(limit=limit)
+
 # \Control Commands ---------------------------------------------------------------------------------------------------------------------------
 
 
@@ -464,9 +476,7 @@ async def DmTest(ctx):
 
 @client.event
 async def on_ready():
-    await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
-    await tree.sync(guild=discord.Object(id=control_guild_id))
-    await tree.sync(guild=discord.Object(id=main_guild_id))
+    await tree.sync()
     print(f'Logged in as {client.user}: commands')
 
 client.run(bot_token)
