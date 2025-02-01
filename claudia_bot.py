@@ -5,8 +5,11 @@ import asyncio
 import math
 from num2words import num2words
 import os
+import random
 
 bot_token=os.environ['TRAITORS_BOT_TOKEN']
+bot_user_id=int(os.environ['TRAITORS_BOT_USER_ID'])
+admin_user_id=int(os.environ['TRAITORS_ADMIN_USER_ID'])
 
 instructions_channel_id=int(os.environ['TRAITORS_INSTRUCTIONS_CHANNEL_ID'])
 traitors_channel_id=int(os.environ['TRAITORS_TRAITORS_CHANNEL_ID'])
@@ -63,10 +66,53 @@ async def help(interaction, message: str):
 )
 async def Test(ctx: discord.Interaction, length: float=5.):
     await ctx.response.send_message(embed=discord.Embed(
-        title="Test succesful",
+        title="Success",
         description="I am still here!",
         color=discord.Color.green()
     ))
+
+@tree.command(
+    name="pick_traitors",
+    description="Pick traitors",
+    guild=discord.Object(id=control_guild_id)
+)
+async def PickTraitors(ctx: discord.Interaction, min:int = 2, min_probabilty:float=.8):
+    num_traitors=min if random.random() < min_probabilty else min + 1
+    main_guild = client.get_guild(main_guild_id)
+    members = [member for member in main_guild.members if member.id not in {bot_user_id, admin_user_id}]
+    traitors=random.sample(members,num_traitors)
+    await ctx.response.send_message(embed=discord.Embed(
+        title="Traitors selected",
+        description=f"{num2words(min).capitalize()} or {num2words(min + 1)} Traitors selected",
+        color=discord.Color.green()
+    ))
+    traitors_channel = client.get_channel(traitors_channel_id)
+    for traitor in traitors:
+        invite = await traitors_channel.create_invite(max_uses=1) 
+        await traitor.send(embed=discord.Embed(
+            title=f"Congratulations, you have been selected to be a traitor!",
+            color=discord.Color.purple()
+        ))
+        await traitor.send(f"🔪 Join the server: {invite.url}")
+
+@tree.command(
+    name="check_traitors",
+    description="Check that the right number of traitors are in the traitors guild.",
+    guild=discord.Object(id=control_guild_id)
+)
+async def CheckTraitors(ctx: discord.Interaction, min:int = 2):
+    traitors_guild = client.get_guild(traitors_only_guild_id)
+    num_members = len([member for member in traitors_guild.members if member.id not in {bot_user_id, admin_user_id}])
+    if num_members == min or num_members == (min + 1):
+        await ctx.response.send_message(embed=discord.Embed(
+            title="There are the right number of traitors",
+            color=discord.Color.green()
+        ))
+    else:
+        await ctx.response.send_message(embed=discord.Embed(
+            title="There are not the right number of traitors",
+            color=discord.Color.red()
+        ))
 
 def CountdownMessage(sec_left: int, length_sec:int) -> discord.Embed:
     minutes, seconds = (length_sec//60, length_sec%60)
@@ -400,7 +446,7 @@ async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
     members = main_guild.members
     user_options = [ discord.SelectOption(label=member.display_name, value=member.id) 
                     for member in main_guild.members 
-                    if member.id not in {1333590716005351435, 1333193323506172097}]
+                    if member.id not in {admin_user_id, bot_user_id}]
     deathmatch_victim_select = Select(
         custom_id="deathmatch_victim_select",
         placeholder="Select an option",
@@ -477,6 +523,7 @@ async def DmTest(ctx):
 @client.event
 async def on_ready():
     await tree.sync()
+    await tree.sync(guild=discord.Object(id=control_guild_id))
     print(f'Logged in as {client.user}: commands')
 
 client.run(bot_token)
