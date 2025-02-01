@@ -523,7 +523,9 @@ async def DmTest(ctx):
 @client.event
 async def on_ready():
     await tree.sync()
+    await tree.sync(guild=discord.Object(id=main_guild_id))
     await tree.sync(guild=discord.Object(id=control_guild_id))
+    await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
     print(f'Logged in as {client.user}: commands')
 
 client.run(bot_token)
