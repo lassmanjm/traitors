@@ -40,7 +40,6 @@ def DisplayVictims(victims: list[str]):
 @tree.command(
     name="help",
     description="Ask anonymous questions to the group",
-    guild=discord.Object(id=traitors_only_guild_id)
 )
 async def help(interaction:discord.Interaction, problem: str):
     instructions_channel = client.get_channel(instructions_channel_id)
