@@ -9,7 +9,7 @@ import random
 
 bot_token=os.environ['TRAITORS_BOT_TOKEN']
 bot_user_id=int(os.environ['TRAITORS_BOT_USER_ID'])
-admin_user_id=int(os.environ['TRAITORS_ADMIN_USER_ID'])
+admin_user_id=int(os.environ.get('TRAITORS_ADMIN_USER_ID', ""))
 
 instructions_channel_id=int(os.environ['TRAITORS_INSTRUCTIONS_CHANNEL_ID'])
 traitors_channel_id=int(os.environ['TRAITORS_TRAITORS_CHANNEL_ID'])
@@ -19,10 +19,19 @@ main_guild_id=int(os.environ['TRAITORS_MAIN_GUILD_ID'])
 traitors_only_guild_id=int(os.environ['TRAITORS_TRAITORS_ONLY_GUILD_ID'])
 control_guild_id=int(os.environ['TRAITORS_CONTROL_GUILD_ID'])
 
+guild_id=int(os.environ['TRAITORS_GUILD_ID'])
+
+kAnnouncementsChannelName="announcements"
+kControlsChannelName="controls"
+kTraitorsInstructionsChannelName="traitors-instructions"
+kTraitorsChatChannelName="traitors-chat"
+
+
 
 intents = discord.Intents.default()
 intents.members = True
 intents.guilds = True 
+intents.guild_messages = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
@@ -34,6 +43,204 @@ def DisplayVictims(victims: list[str]):
     out=victims.copy()
     out[-1]=f"and {out[-1]}"
     return ', '.join(out)
+
+def Error(description:str) -> discord.Embed:
+    return discord.Embed(
+        title="ERROR", 
+        description=description,
+        color=discord.Color.red()
+        )
+    
+def ChannelNotFoundError(channel_name: str) -> discord.Embed:
+    return Error(f"Channel `{channel_name}` not found.")
+
+
+async def SendError(error: discord.Embed):
+    guild=client.get_guild(guild_id)
+    controls_channel=ControlsChannel()
+    if controls_channel:
+        await controls_channel.send(embed=error)
+    else: 
+        await guild.owner.send(embed=ChannelNotFoundError(kControlsChannelName))
+        await guild.owner.send(embed=error)
+    
+
+async def AnnouncementsChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=client.get_guild(guild_id)
+    channel = discord.utils.get(guild.text_channels, name=kAnnouncementsChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kAnnouncementsChannelName))
+    return channel
+        
+
+async def TraitorsInstructionsChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=client.get_guild(guild_id)
+    channel = discord.utils.get(guild.text_channels, name=kTraitorsInstructionsChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kTraitorsInstructionsChannelName))
+    return channel
+
+async def TraitorsChatChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=client.get_guild(guild_id)
+    channel = discord.utils.get(guild.text_channels, name=kTraitorsChatChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kTraitorsChatChannelName))
+    return channel
+
+def ControlsChannel()->discord.TextChannel | None:
+    guild=client.get_guild(guild_id)
+    return discord.utils.get(guild.text_channels, name=kControlsChannelName)
+
+async def AddTraitor(member: discord.Member) -> bool:
+    for channel in [await TraitorsInstructionsChannel(), await TraitorsChatChannel()]:
+        if not channel:
+            return False
+        # Grant permission to the user to view the channel
+        await channel.set_permissions(member, view_channel=True)
+        
+async def ClearTraitors():
+    guild=client.get_guild(guild_id)
+    for channel in [await TraitorsInstructionsChannel(), await TraitorsChatChannel()]:
+        for user_or_role in channel.overwrites.keys():
+            # Skip the bot and server owner
+            if user_or_role != guild.me and user_or_role != guild.owner:
+                await channel.set_permissions(
+                    user_or_role,
+                    overwrite=discord.PermissionOverwrite(view_channel=False)
+                    ) 
+async def CheckNumTraitors(valid_nums:set[int]) -> bool:   
+    guild=client.get_guild(guild_id)
+    instructions_channel = await TraitorsInstructionsChannel()
+    if not instructions_channel:
+        return False
+    if not chat_channel:
+        return False
+    chat_channel = await TraitorsChatChannel()
+    num_instructions_members = 0
+    num_chat_members = 0
+    for member in guild.members:
+        if member.id not in {admin_user_id, bot_user_id}:
+            if instructions_channel.permissions_for(member).view_channel:
+                num_instructions_members += 1
+            if chat_channel.permissions_for(member).view_channel:
+                num_chat_members += 1
+    if num_instructions_members not in valid_nums or num_chat_members not in valid_nums:
+        return False
+    return True
+
+# Setup --------------------------------------------------------------------------------------------------------------------------------------
+async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:bool=True):
+    guild=client.get_guild(guild_id)
+
+    # Create controls channel
+    controls_channel = ControlsChannel()
+    if not controls_channel:
+        await output_channel.send("Creating controls channel")
+        announcements_channel = await guild.create_text_channel(kControlsChannelName)
+    
+    # Create read only announcements channel that only Claudia can send messages to 
+    read_only = {
+        guild.default_role: discord.PermissionOverwrite(send_messages=False),
+        guild.me: discord.PermissionOverwrite(send_messages=True)
+    }
+    announcements_channel = await AnnouncementsChannel(send_error=False)
+    if not announcements_channel:
+        await output_channel.send("Creating announcements channel")
+        announcements_channel = await guild.create_text_channel(kAnnouncementsChannelName,overwrites=read_only)
+    
+    # Create private instructions channel for only traitors (initially with just Claudia and the owner)
+    traitors_only_permissions = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True),
+    }
+    traitors_instructions_channel = await TraitorsInstructionsChannel(send_error=False)
+    if not traitors_instructions_channel:
+        await output_channel.send("Creating traitors-instructions channel")
+        traitors_instructions_channel = await guild.create_text_channel(
+            kTraitorsInstructionsChannelName,
+            overwrites=traitors_only_permissions
+            )
+
+    traitors_chat_channel = await TraitorsChatChannel(send_error=False)
+    if not traitors_chat_channel:
+        await output_channel.send("Creating traitors-chat channel")
+        traitors_chat_channel = await guild.create_text_channel(
+            kTraitorsChatChannelName,
+            overwrites=traitors_only_permissions
+            )
+    if clear_traitors:
+        await ClearTraitors()
+        
+    
+@tree.command(
+    name="initialize",
+    description="Initialize traitors server",
+    guild=discord.Object(id=guild_id)
+)
+async def Initialize(ctx:discord.Interaction):
+    await ctx.response.send_message("Initializing for new game")
+    await InitializeImpl(ctx.channel)
+
+@tree.command(
+    name="new_game",
+    description="Start a new game",
+    guild=discord.Object(id=guild_id)
+)
+async def NewGame(ctx:discord.Interaction, min_num_traitors: int = 2, probability_of_min: float = .8):
+    await ctx.response.send_message(f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors...")
+    await InitializeImpl(ctx.channel)
+
+    num_traitors = min_num_traitors if random.random() < probability_of_min else min_num_traitors + 1
+    guild = client.get_guild(guild)
+    members = [member for member in guild.members if member.id not in {bot_user_id, admin_user_id}]
+    traitors=random.sample(members,num_traitors)
+    for traitor in traitors:
+        AddTraitor(traitor)
+        traitor.send(
+            title=f"Congratulations, you have been selected to be a traitor!",
+            description="The traitors private channels are now available for communication and instructions.",
+            color=discord.Color.purple()
+        )
+    correct_num_traitors = False
+    traitors_instructions=TraitorsInstructionsChannel()
+    if traitors_instructions:
+        num_members = len([member for member in traitors_instructions. if member.id not in {bot_user_id, admin_user_id}])
+    if num_members == min or num_members == (min + 1):
+        await ctx.response.send_message(embed=discord.Embed(
+            title="There are the right number of traitors",
+            color=discord.Color.green()
+        ))
+    else:
+        await ctx.response.send_message(embed=discord.Embed(
+            title="There are not the right number of traitors",
+            color=discord.Color.red()
+        ))
+    if not await CheckNumTraitors:
+        ctx.channel.send(Error("Incorrect number of traitors in channels."))
+
+
+
+
+
+@tree.command(
+    name="add_traitor",
+    description="Add user tp traitors server",
+    guild=discord.Object(id=guild_id)
+)
+async def add_traitor(ctx: discord.Interaction, member: discord.Member):
+    # Get the channel by name
+    await ctx.response.send_message("adding")
+    await AddTraitor(member)
+
+
+@tree.command(
+    name="clear_all_traitors",
+    description="Remove all traitors",
+    guild=discord.Object(id=guild_id)
+)
+async def ClearAllTraitors(ctx:discord.Interaction):
+    await ClearTraitors()
+    await ctx.response.send_message("All traitors removed.")
 
 # Traitor commands ---------------------------------------------------------------------------------------------------------------------------
 
@@ -522,6 +729,7 @@ async def DmTest(ctx):
 @client.event
 async def on_ready():
     await tree.sync()
+    await tree.sync(guild=discord.Object(id=guild_id))
     await tree.sync(guild=discord.Object(id=main_guild_id))
     await tree.sync(guild=discord.Object(id=control_guild_id))
     await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
