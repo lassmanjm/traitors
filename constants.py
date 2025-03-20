@@ -1,0 +1,4 @@
+kAnnouncementsChannelName="announcements"
+kControlsChannelName="controls"
+kTraitorsInstructionsChannelName="traitors-instructions"
+kTraitorsChatChannelName="traitors-chat"
