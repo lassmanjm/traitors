@@ -1,23 +1,33 @@
+from absl import app
+from absl import flags
 import discord
 from discord import app_commands
-from discord.ui import Select, View
+from discord.ui import Select, View, Button
 import asyncio
 import math
 from num2words import num2words
 import os
 import random
 
+FLAGS = flags.FLAGS
+flags.DEFINE_string(
+    "bot_token",
+    os.environ.get('TRAITORS_BOT_TOKEN'),
+    "",
+)
+
+
 bot_token=os.environ['TRAITORS_BOT_TOKEN']
-bot_user_id=int(os.environ['TRAITORS_BOT_USER_ID'])
-admin_user_id=int(os.environ.get('TRAITORS_ADMIN_USER_ID', ""))
+# bot_user_id=int(os.environ['TRAITORS_BOT_USER_ID'])
+# admin_user_id=int(os.environ.get('TRAITORS_ADMIN_USER_ID', ""))
 
-instructions_channel_id=int(os.environ['TRAITORS_INSTRUCTIONS_CHANNEL_ID'])
-traitors_channel_id=int(os.environ['TRAITORS_TRAITORS_CHANNEL_ID'])
-control_channel_id=int(os.environ['TRAITORS_CONTROL_CHANNEL_ID'])
+# instructions_channel_id=int(os.environ['TRAITORS_INSTRUCTIONS_CHANNEL_ID'])
+# traitors_channel_id=int(os.environ['TRAITORS_TRAITORS_CHANNEL_ID'])
+# control_channel_id=int(os.environ['TRAITORS_CONTROL_CHANNEL_ID'])
 
-main_guild_id=int(os.environ['TRAITORS_MAIN_GUILD_ID'])
-traitors_only_guild_id=int(os.environ['TRAITORS_TRAITORS_ONLY_GUILD_ID'])
-control_guild_id=int(os.environ['TRAITORS_CONTROL_GUILD_ID'])
+# main_guild_id=int(os.environ['TRAITORS_MAIN_GUILD_ID'])
+# traitors_only_guild_id=int(os.environ['TRAITORS_TRAITORS_ONLY_GUILD_ID'])
+# control_guild_id=int(os.environ['TRAITORS_CONTROL_GUILD_ID'])
 
 guild_id=int(os.environ['TRAITORS_GUILD_ID'])
 
@@ -35,6 +45,39 @@ intents.guild_messages = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+def Guild() -> discord.Guild | None:
+    return client.get_guild(guild_id)
+
+
+async def AnnouncementsChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=Guild()
+    channel = discord.utils.get(guild.text_channels, name=kAnnouncementsChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kAnnouncementsChannelName))
+    return channel
+        
+
+async def TraitorsInstructionsChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=Guild()
+    channel = discord.utils.get(guild.text_channels, name=kTraitorsInstructionsChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kTraitorsInstructionsChannelName))
+    return channel
+
+
+async def TraitorsChatChannel(send_error:bool = True)->discord.TextChannel | None:
+    guild=Guild()
+    channel = discord.utils.get(guild.text_channels, name=kTraitorsChatChannelName)
+    if not channel and send_error:
+        await SendError(ChannelNotFoundError(kTraitorsChatChannelName))
+    return channel
+
+
+def ControlsChannel()->discord.TextChannel | None:
+    guild=Guild()
+    return discord.utils.get(guild.text_channels, name=kControlsChannelName)
+
+
 def DisplayVictims(victims: list[str]):
     if len(victims) == 1:
         return victims[0]
@@ -44,19 +87,21 @@ def DisplayVictims(victims: list[str]):
     out[-1]=f"and {out[-1]}"
     return ', '.join(out)
 
+
 def Error(description:str) -> discord.Embed:
     return discord.Embed(
         title="ERROR", 
         description=description,
         color=discord.Color.red()
         )
+
     
 def ChannelNotFoundError(channel_name: str) -> discord.Embed:
     return Error(f"Channel `{channel_name}` not found.")
 
 
 async def SendError(error: discord.Embed):
-    guild=client.get_guild(guild_id)
+    guild=Guild()
     controls_channel=ControlsChannel()
     if controls_channel:
         await controls_channel.send(embed=error)
@@ -65,32 +110,24 @@ async def SendError(error: discord.Embed):
         await guild.owner.send(embed=error)
     
 
-async def AnnouncementsChannel(send_error:bool = True)->discord.TextChannel | None:
-    guild=client.get_guild(guild_id)
-    channel = discord.utils.get(guild.text_channels, name=kAnnouncementsChannelName)
-    if not channel and send_error:
-        await SendError(ChannelNotFoundError(kAnnouncementsChannelName))
-    return channel
-        
+async def CheckControlChannel(ctx: discord.Interaction) -> bool:
+    if ctx.channel.name == kControlsChannelName:
+        return True
+    await ctx.response.send_message(
+        embed=Error("Must execture this command from control channel!"),
+        ephemeral=True
+        )
+    return False
 
-async def TraitorsInstructionsChannel(send_error:bool = True)->discord.TextChannel | None:
-    guild=client.get_guild(guild_id)
-    channel = discord.utils.get(guild.text_channels, name=kTraitorsInstructionsChannelName)
-    if not channel and send_error:
-        await SendError(ChannelNotFoundError(kTraitorsInstructionsChannelName))
-    return channel
 
-async def TraitorsChatChannel(send_error:bool = True)->discord.TextChannel | None:
-    guild=client.get_guild(guild_id)
-    channel = discord.utils.get(guild.text_channels, name=kTraitorsChatChannelName)
-    if not channel and send_error:
-        await SendError(ChannelNotFoundError(kTraitorsChatChannelName))
-    return channel
-
-def ControlsChannel()->discord.TextChannel | None:
-    guild=client.get_guild(guild_id)
-    return discord.utils.get(guild.text_channels, name=kControlsChannelName)
-
+async def CheckOwner(ctx: discord.Interaction) -> bool:
+    if ctx.user == ctx.guild.owner:
+        return True
+    await ctx.response.send_message(
+        embed=Error("Command must be executed by owner of guild!"),
+        ephemeral=True
+        )
+    return False
 async def AddTraitor(member: discord.Member) -> bool:
     for channel in [await TraitorsInstructionsChannel(), await TraitorsChatChannel()]:
         if not channel:
@@ -98,8 +135,9 @@ async def AddTraitor(member: discord.Member) -> bool:
         # Grant permission to the user to view the channel
         await channel.set_permissions(member, view_channel=True)
         
+
 async def ClearTraitors():
-    guild=client.get_guild(guild_id)
+    guild=Guild()
     for channel in [await TraitorsInstructionsChannel(), await TraitorsChatChannel()]:
         for user_or_role in channel.overwrites.keys():
             # Skip the bot and server owner
@@ -108,35 +146,140 @@ async def ClearTraitors():
                     user_or_role,
                     overwrite=discord.PermissionOverwrite(view_channel=False)
                     ) 
+
+
 async def CheckNumTraitors(valid_nums:set[int]) -> bool:   
-    guild=client.get_guild(guild_id)
+    guild=Guild()
     instructions_channel = await TraitorsInstructionsChannel()
+    chat_channel = await TraitorsChatChannel()
     if not instructions_channel:
         return False
     if not chat_channel:
         return False
-    chat_channel = await TraitorsChatChannel()
     num_instructions_members = 0
     num_chat_members = 0
-    for member in guild.members:
-        if member.id not in {admin_user_id, bot_user_id}:
-            if instructions_channel.permissions_for(member).view_channel:
-                num_instructions_members += 1
-            if chat_channel.permissions_for(member).view_channel:
-                num_chat_members += 1
+    for player in GetPlayers():
+        if instructions_channel.permissions_for(player).view_channel:
+            num_instructions_members += 1
+        if chat_channel.permissions_for(player).view_channel:
+            num_chat_members += 1
     if num_instructions_members not in valid_nums or num_chat_members not in valid_nums:
+        await SendError(Error("Incorrect number of traitors!"))
         return False
     return True
 
+
+def IsPlayer(user: discord.Member) -> bool: 
+    guild=Guild()
+    if user in {guild.me, guild.owner}:
+        return False
+    return True
+
+
+def GetPlayers() -> set[discord.Member]:
+    guild=Guild()
+    players=set()
+    for member in guild.members:
+        if IsPlayer(member):
+            players.add(member)
+    return players
+
+
+async def IsTraitor(user: discord.Member) -> bool:
+    if not IsPlayer(user):
+        return False
+    traitors_channel = await TraitorsInstructionsChannel()
+    if traitors_channel.overwrites[user].view_channel:
+        return True
+    return False
+
+
+async def GetTraitors()->set[discord.Member]:
+    return {player for player in GetPlayers() if await IsTraitor(player)}
+
+
+async def GetFaithful()->set[discord.Member]:
+    return {player for player in GetPlayers() if not await IsTraitor(player)}
+    
+    
 # Setup --------------------------------------------------------------------------------------------------------------------------------------
-async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:bool=True):
-    guild=client.get_guild(guild_id)
+@tree.command(
+    name="add_to_controls",
+    description="Add player to controls channel",
+    guild=discord.Object(id=guild_id)
+)
+async def AddToControls(ctx:discord.Interaction, player: discord.User):
+    if not await CheckControlChannel(ctx) or not await CheckOwner(ctx):
+        return
+    await ctx.channel.set_permissions(player, view_channel=True)
+    await ctx.response.send_message(f"{player.name} added!")
+    return
+
+
+@tree.command(
+    name="remove_from_controls",
+    description="Add player to controls channel",
+    guild=discord.Object(id=guild_id)
+)
+async def RemoveFromControls(ctx:discord.Interaction, player: discord.User):
+    if not await CheckControlChannel(ctx) or not await CheckOwner(ctx):
+        return
+    guild=Guild()
+    await ctx.channel.set_permissions(player, view_channel=False)
+    await ctx.response.send_message(f"{player.name} removed!")
+    return
+
+
+class ConfirmButton(Button):
+    def __init__(self, traitors: set[discord.Member]):
+        super().__init__(label="Click Me", style=discord.ButtonStyle.primary)
+        self.traitors_left=traitors
+        self.lock=asyncio.Lock()
+
+    async def callback(self, interaction: discord.Interaction):
+        async with self.lock:
+            if interaction.user not in self.traitors_left:
+                await interaction.response.defer()
+                return
+
+            await interaction.response.send_message("Thanks for confirming!", ephemeral=True)
+            self.traitors_left.discard(interaction.user)
+            if len(self.traitors_left) == 0:
+                announcements_channel = await AnnouncementsChannel()
+                await announcements_channel.send(
+                    embed=discord.Embed(
+                        title="The traitors have been selected",
+                        description="Let the game begin.",
+                        color=discord.Color.purple()
+                    )
+                )
+                self.disabled=True
+                await interaction.message.edit(view=self.view)
+        
+async def ConfirmTraitors(traitors :set[discord.Member]):
+    view=View()
+    view.add_item(ConfirmButton(traitors))
+    instructions_channel = await TraitorsInstructionsChannel()
+    await instructions_channel.send("comfirm", view=view)
+
+
+    
+async def InitializeImpl(output_channel: discord.TextChannel, caller: discord.Member, clear_traitors:bool=True):
+    guild=Guild()
+
+    private_channel_permissions = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True),
+    }
 
     # Create controls channel
     controls_channel = ControlsChannel()
     if not controls_channel:
         await output_channel.send("Creating controls channel")
-        announcements_channel = await guild.create_text_channel(kControlsChannelName)
+        controls_channel = await guild.create_text_channel(
+            kControlsChannelName,
+            overwrites=private_channel_permissions
+            )
     
     # Create read only announcements channel that only Claudia can send messages to 
     read_only = {
@@ -149,16 +292,12 @@ async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:boo
         announcements_channel = await guild.create_text_channel(kAnnouncementsChannelName,overwrites=read_only)
     
     # Create private instructions channel for only traitors (initially with just Claudia and the owner)
-    traitors_only_permissions = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        guild.me: discord.PermissionOverwrite(view_channel=True),
-    }
     traitors_instructions_channel = await TraitorsInstructionsChannel(send_error=False)
     if not traitors_instructions_channel:
         await output_channel.send("Creating traitors-instructions channel")
         traitors_instructions_channel = await guild.create_text_channel(
             kTraitorsInstructionsChannelName,
-            overwrites=traitors_only_permissions
+            overwrites=private_channel_permissions
             )
 
     traitors_chat_channel = await TraitorsChatChannel(send_error=False)
@@ -166,7 +305,7 @@ async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:boo
         await output_channel.send("Creating traitors-chat channel")
         traitors_chat_channel = await guild.create_text_channel(
             kTraitorsChatChannelName,
-            overwrites=traitors_only_permissions
+            overwrites=private_channel_permissions
             )
     if clear_traitors:
         await ClearTraitors()
@@ -177,9 +316,11 @@ async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:boo
     description="Initialize traitors server",
     guild=discord.Object(id=guild_id)
 )
-async def Initialize(ctx:discord.Interaction):
+async def Initialize(ctx:discord.Interaction, clear_traitors: bool=False):
+    if not await CheckControlChannel(ctx):
+        return False
     await ctx.response.send_message("Initializing for new game")
-    await InitializeImpl(ctx.channel)
+    await InitializeImpl(ctx.channel, ctx.user)
 
 @tree.command(
     name="new_game",
@@ -187,52 +328,110 @@ async def Initialize(ctx:discord.Interaction):
     guild=discord.Object(id=guild_id)
 )
 async def NewGame(ctx:discord.Interaction, min_num_traitors: int = 2, probability_of_min: float = .8):
+    if not await CheckControlChannel(ctx):
+        return False
     await ctx.response.send_message(f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors...")
-    await InitializeImpl(ctx.channel)
+    await InitializeImpl(ctx.channel,ctx.user)
 
     num_traitors = min_num_traitors if random.random() < probability_of_min else min_num_traitors + 1
-    guild = client.get_guild(guild)
-    members = [member for member in guild.members if member.id not in {bot_user_id, admin_user_id}]
-    traitors=random.sample(members,num_traitors)
+    traitors=random.sample(list(GetPlayers()),num_traitors)
     for traitor in traitors:
-        AddTraitor(traitor)
-        traitor.send(
-            title=f"Congratulations, you have been selected to be a traitor!",
-            description="The traitors private channels are now available for communication and instructions.",
-            color=discord.Color.purple()
+        await AddTraitor(traitor)
+        await traitor.send(
+            embed=discord.Embed(
+                title=f"Congratulations, you have been selected to be a traitor!",
+                description="The traitors private channels are now available for communication and instructions.",
+                color=discord.Color.purple()
+            )
         )
-    correct_num_traitors = False
-    traitors_instructions=TraitorsInstructionsChannel()
-    if traitors_instructions:
-        num_members = len([member for member in traitors_instructions. if member.id not in {bot_user_id, admin_user_id}])
-    if num_members == min or num_members == (min + 1):
-        await ctx.response.send_message(embed=discord.Embed(
-            title="There are the right number of traitors",
+    traitors_instructions= await TraitorsInstructionsChannel()
+    if not traitors_instructions:
+        return
+    if not await CheckNumTraitors({min_num_traitors,min_num_traitors + 1}):
+        return
+    await ctx.channel.send(
+        embed=discord.Embed(
+            title="New game started successfully!",
             color=discord.Color.green()
-        ))
-    else:
-        await ctx.response.send_message(embed=discord.Embed(
-            title="There are not the right number of traitors",
-            color=discord.Color.red()
-        ))
-    if not await CheckNumTraitors:
-        ctx.channel.send(Error("Incorrect number of traitors in channels."))
-
-
-
+        )
+        )
+    await ConfirmTraitors(await GetTraitors())
 
 
 @tree.command(
-    name="add_traitor",
-    description="Add user tp traitors server",
+    name="check_traitors",
+    description="Check that the number of traitors is as expected",
     guild=discord.Object(id=guild_id)
 )
-async def add_traitor(ctx: discord.Interaction, member: discord.Member):
-    # Get the channel by name
-    await ctx.response.send_message("adding")
-    await AddTraitor(member)
+async def CheckTraitors(ctx:discord.Interaction, min_expected: int):
+    if not await CheckNumTraitors({min_expected, min_expected + 1}):
+        await ctx.response.send_message("Traitor initialization unsuccessful!")
+        return
+    await ctx.response.send_message(
+        embed=discord.Embed(
+            title="Success!",
+            description="The traitors have been initialized successfully.",
+            color=discord.Color.green()
+            )
+        )
+    return
 
 
+async def CheckPlayerCallback(interaction: discord.Interaction, view: View,  member: discord.Member, probability: float):
+    check_player_resonse=None
+    for item in view.children:
+        if item.custom_id=="check_player":
+            check_player_resonse=item
+        
+    check_player_resonse.disabled = True
+    await interaction.message.edit(view=view)
+
+    if check_player_resonse.values[0] == "no":
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title=f"{member.display_name} not added.",
+                color=discord.Color.red()
+                )
+            )
+        return
+
+    if random.random() < probability:
+        await AddTraitor(member)
+
+    await interaction.response.send_message(
+        embed=discord.Embed(
+            title=f"{member.display_name} added to game!",
+            color=discord.Color.green()
+            )
+        )
+    
+
+@tree.command(
+    name="add_player",
+    description="Add player to game, possibly making them a traitor",
+    guild=discord.Object(id=guild_id)
+)
+# Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
+# of .8, this gives the same probability for any new players.
+async def AddPlayer(ctx: discord.Interaction, member: discord.Member, probability: float = .22):
+    if not await CheckControlChannel(ctx):
+        return
+    # await ctx.response.send_message(f"Adding{member.display_name} to the game...")
+    check_player = Select(
+        custom_id="check_player",
+        placeholder="Respond",
+        options=[
+            discord.SelectOption(label="yes", value="yes"),
+            discord.SelectOption(label="no", value="no"),
+            ]
+        )
+    view = View()
+    view.add_item(check_player)
+        
+    await ctx.response.send_message(f"Confirm: Add {member.display_name} to the game with {probability} chance of being a traitor?", view=view)
+    check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, member, probability)
+
+    
 @tree.command(
     name="clear_all_traitors",
     description="Remove all traitors",
@@ -249,14 +448,14 @@ async def ClearAllTraitors(ctx:discord.Interaction):
     description="Ask anonymous questions to the group",
 )
 async def help(interaction:discord.Interaction, problem: str):
-    instructions_channel = client.get_channel(instructions_channel_id)
+    announcements_channel = await AnnouncementsChannel()
     await interaction.response.send_message("Help requested!", ephemeral=True)
-    await instructions_channel.send(embed=discord.Embed(title="Anonymous help requested!", description=problem, color=discord.Color.pink()) )
+    await announcements_channel.send(embed=discord.Embed(title="Anonymous help requested!", description=problem, color=discord.Color.pink()) )
 
 @tree.command(
     name="anonymous",
     description="Communicate anonymously with the group",
-    guild=discord.Object(id=traitors_only_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def help(interaction:discord.Interaction, message: str):
     instructions_channel = client.get_channel(instructions_channel_id)
@@ -268,7 +467,7 @@ async def help(interaction:discord.Interaction, message: str):
 @tree.command(
     name="test",
     description="Test the bot",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def Test(ctx: discord.Interaction, length: float=5.):
     await ctx.response.send_message(embed=discord.Embed(
@@ -280,7 +479,7 @@ async def Test(ctx: discord.Interaction, length: float=5.):
 @tree.command(
     name="pick_traitors",
     description="Pick traitors",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def PickTraitors(ctx: discord.Interaction, min:int = 2, min_probabilty:float=.8):
     num_traitors=min if random.random() < min_probabilty else min + 1
@@ -302,9 +501,9 @@ async def PickTraitors(ctx: discord.Interaction, min:int = 2, min_probabilty:flo
         await traitor.send(f"🔪 Join the server: {invite.url}")
 
 @tree.command(
-    name="check_traitors",
+    name="check_traitors_old",
     description="Check that the right number of traitors are in the traitors guild.",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def CheckTraitors(ctx: discord.Interaction, min:int = 2):
     traitors_guild = client.get_guild(traitors_only_guild_id)
@@ -341,7 +540,7 @@ def CountdownMessage(sec_left: int, length_sec:int) -> discord.Embed:
 @tree.command(
     name="round_table",
     description="Initiate a round table",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def RoundTable(ctx, length_min: float=5.):
     length_sec=math.floor(length_min*60)
@@ -390,7 +589,7 @@ async def victim_select_callback(interaction: discord.Interaction, view):
 @tree.command(
     name="murder",
     description="Send instructions to murder",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def Murder(ctx, num_victims:int = 1):
     traitors_channel = client.get_channel(traitors_channel_id)
@@ -573,7 +772,7 @@ async def RecruitDecideCallback(interaction: discord.Interaction, view):
 @tree.command(
     name="recruit",
     description="Send instructions to recruit",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def Recruit(ctx, force:bool = False):
     traitors_channel = client.get_channel(traitors_channel_id)
@@ -643,7 +842,7 @@ async def DeathmatchVictimSelectCallback(interaction: discord.Interaction, view,
 @tree.command(
     name="deathmatch",
     description="Send instructions for deathmatch",
-    guild=discord.Object(id=control_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def DeathMatch(ctx, num_players:int = 4, num_victims:int = 1):
     traitors_channel = client.get_channel(traitors_channel_id)
@@ -694,7 +893,7 @@ async def DeleteMessages(ctx, limit:int=None):
 @tree.command(
     name="dm_test",
     description="Test DM all players.",
-    guild=discord.Object(id=main_guild_id)
+    guild=discord.Object(id=guild_id)
 )
 async def DmTest(ctx):
     # Get the guild (server) the command was called from
@@ -728,11 +927,15 @@ async def DmTest(ctx):
 
 @client.event
 async def on_ready():
+    # ---------------------------------------------------
+    import test_command 
+    test_command.SetupCommands(tree, guild_id)
+    # ---------------------------------------------------
     await tree.sync()
     await tree.sync(guild=discord.Object(id=guild_id))
-    await tree.sync(guild=discord.Object(id=main_guild_id))
-    await tree.sync(guild=discord.Object(id=control_guild_id))
-    await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
+    # await tree.sync(guild=discord.Object(id=main_guild_id))
+    # await tree.sync(guild=discord.Object(id=control_guild_id))
+    # await tree.sync(guild=discord.Object(id=traitors_only_guild_id))
     print(f'Logged in as {client.user}: commands')
 
 client.run(bot_token)
