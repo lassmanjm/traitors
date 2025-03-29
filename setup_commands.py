@@ -13,7 +13,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
 
   @tree.command(
       name="add_to_controls",
-      description="Add player to controls channel",
+      description="Add player to the controls channel",
       guild=discord.Object(id=guild_id)
   )
   async def AddToControls(ctx:discord.Interaction, player: discord.User):
@@ -26,7 +26,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
 
   @tree.command(
       name="remove_from_controls",
-      description="Add player to controls channel",
+      description="Remove a player from the controls channel",
       guild=discord.Object(id=guild_id)
   )
   async def RemoveFromControls(ctx:discord.Interaction, player: discord.User):
@@ -40,7 +40,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
 
   class ConfirmButton(Button):
       def __init__(self, traitors: set[discord.Member]):
-          super().__init__(label="Click Me", style=discord.ButtonStyle.primary)
+          super().__init__(label="Click Me", style=discord.ButtonStyle.blurple)
           self.traitors_left=traitors
           self.lock=asyncio.Lock()
 
