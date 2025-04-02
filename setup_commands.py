@@ -12,6 +12,20 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
   utils=ClaudiaUtils(client, guild_id)
 
   @tree.command(
+      name="test",
+      description="Test the bot",
+      guild=discord.Object(id=guild_id)
+  )
+  async def Test(ctx: discord.Interaction):
+      if not await utils.CheckControlChannel(ctx):
+          return
+      await ctx.response.send_message(embed=discord.Embed(
+          title="Success",
+          description="I am still here!",
+          color=discord.Color.green()
+      ))
+
+  @tree.command(
       name="add_to_controls",
       description="Add player to the controls channel",
       guild=discord.Object(id=guild_id)
@@ -138,10 +152,15 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
   async def NewGame(ctx:discord.Interaction, min_num_traitors: int = 2, probability_of_min: float = .8):
       if not await utils.CheckControlChannel(ctx):
           return False
+      num_traitors = min_num_traitors if random.random() < probability_of_min else min_num_traitors + 1
+      players = utils.GetPlayers()
+      if len(players) < min_num_traitors + ( 0 if probability_of_min >= 1 else 1 ):
+          await ctx.response.send_message(embed=utils.Error("Possible number of traitors higher than number of players"))
+          return
       await ctx.response.send_message(f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors...")
+
       await InitializeImpl(ctx.channel,ctx.user)
 
-      num_traitors = min_num_traitors if random.random() < probability_of_min else min_num_traitors + 1
       traitors=random.sample(list(utils.GetPlayers()),num_traitors)
       for traitor in traitors:
           await utils.AddTraitor(traitor)
@@ -212,7 +231,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
               color=discord.Color.green()
               )
           )
-      
+
 
   @tree.command(
       name="add_player",
