@@ -6,6 +6,9 @@ from discord.ui import Select, View, Button
 import asyncio
 from num2words import num2words
 import random
+import base64
+import binascii
+import json
 
 
 def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord.Client):
@@ -183,6 +186,127 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
             )
             )
         await ConfirmTraitors(await utils.GetTraitors())
+
+    @tree.command(
+        name="save_game",
+        description="Save the traitors as an encoded string",
+        guild=discord.Object(id=guild_id)
+    )
+    async def SaveGame(interaction:discord.Interaction):
+        def encode(players: dict)->str:
+            string=json.dumps(players)
+            return base64.urlsafe_b64encode(string.encode()).decode()
+   
+        players={
+            "faithful": { member.id: member.name for member in await utils.GetFaithful() },
+            "traitor": { member.id: member.name for member in await utils.GetTraitors() }
+        }
+
+        saved_game = encode(players)
+
+        description=(
+            f"A game has been saved with the following players:"
+            f"\n* {"\n* ".join([ player.name for player in utils.GetPlayers()])}.\n\n"
+            "Copy the following text and paste into the `/load_game` command to load game."
+        )
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Game saved!",
+                description=description + " A copy has been DM'd to you as well.",
+                color=discord.Color.green()
+                )
+            )
+        await interaction.channel.send(f"```{saved_game}```")
+        await interaction.user.send(
+            embed=discord.Embed(
+                title="Game saved!",
+                description=description,
+                color=discord.Color.green()
+                )
+            )
+        await interaction.user.send(f"```{saved_game}```")
+
+
+    @tree.command(
+        name="load_game",
+        description="Load the traitors from an encoded string",
+        guild=discord.Object(id=guild_id)
+    )
+    async def LoadGame(interaction:discord.Interaction, saved_game: str):
+        if not await utils.CheckControlChannel(interaction):
+            return
+        await InitializeImpl(interaction.channel, interaction.user)
+
+        async def decode(encoded_text)->dict[str, dict[int, str]]:
+            """Decodes the encoded string back to a list of member IDs."""
+            try:
+               return json.loads(base64.urlsafe_b64decode(encoded_text.strip("`").encode()).decode())
+            except (binascii.Error, UnicodeDecodeError)  as e:
+                await interaction.response.send_message(embed=utils.Error("Unable to decode saved game. make sure you copied it correctly."))
+                return None
+                
+
+        
+        missing_players=set()
+        old_players=set()
+        guild = utils.Guild()
+        decoded_game = await decode(saved_game)
+        if not decoded_game:
+            return
+        for id, name in decoded_game["traitor"].items():
+            traitor = guild.get_member(int(id))
+            if not traitor:
+                missing_players.add(name)
+                continue
+            old_players.add(traitor)
+            await traitor.send(
+                embed=discord.Embed(
+                    title="A game has been loaded",
+                    description="You are a **traitor**.",
+                    color=discord.Color.purple()
+                    )
+                )
+            await utils.AddTraitor(traitor)
+        for id, name in decoded_game["faithful"].items():
+            faithful=guild.get_member(int(id))
+            if not faithful:
+                missing_players.add(name)
+                continue
+            old_players.add(faithful)
+            await faithful.send(
+                embed=discord.Embed(
+                    title="A game has been loaded",
+                    description="You are a **faithful**.",
+                    color=discord.Color.purple()
+                    )
+                )
+        current_players = utils.GetPlayers()
+        print("\n\n\n")
+        print(current_players)
+        print(old_players)
+        print("\n\n\n")
+
+        new_players=current_players - old_players
+        description=""
+        if missing_players:
+            description+=(
+                "These players are no longer present in the server:"
+                f"\n* {"\n* ".join(missing_players)}.\n\n"
+                )
+        if new_players:
+            description+=(
+                "These players in the sever were not previously present:"
+                f"\n* {"\n* ".join({ player.name for player in new_players })}.\n\n"
+                )
+        description+="Have fun!"
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Game loaded!",
+                description=description,
+                color=discord.Color.green()
+                )
+            )
 
 
     @tree.command(
