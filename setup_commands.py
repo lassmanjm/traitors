@@ -142,10 +142,10 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         guild=discord.Object(id=guild_id)
     )
     async def Initialize(ctx:discord.Interaction, clear_traitors: bool=False):
-        if not await utils.CheckControlChannel(ctx):
+        if clear_traitors and not await utils.CheckControlChannel(ctx):
             return False
         await ctx.response.send_message("Initializing for new game")
-        await InitializeImpl(ctx.channel, ctx.user)
+        await InitializeImpl(ctx.channel, ctx.user, clear_traitors)
 
     @tree.command(
         name="new_game",
