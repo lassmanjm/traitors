@@ -282,10 +282,6 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
                     )
                 )
         current_players = utils.GetPlayers()
-        print("\n\n\n")
-        print(current_players)
-        print(old_players)
-        print("\n\n\n")
 
         new_players=current_players - old_players
         description=""
