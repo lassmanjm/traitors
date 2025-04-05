@@ -360,7 +360,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
     )
     # Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
     # of .8, this gives the same probability for any new players.
-    async def AddPlayer(ctx: discord.Interaction, member: discord.Member, probability: float = .22):
+    async def AddPlayer(ctx: discord.Interaction, player: discord.Member, probability: float = .22):
         if not await utils.CheckControlChannel(ctx):
             return
         # await ctx.response.send_message(f"Adding{member.display_name} to the game...")
@@ -375,8 +375,8 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         view = View()
         view.add_item(check_player)
             
-        await ctx.response.send_message(f"Confirm: Add {member.display_name} to the game with {probability} chance of being a traitor?", view=view)
-        check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, member, probability)
+        await ctx.response.send_message(f"Confirm: Add {player.display_name} to the game with {probability} chance of being a traitor?", view=view)
+        check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, player, probability)
 
         
     @tree.command(
