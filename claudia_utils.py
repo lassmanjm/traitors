@@ -103,16 +103,24 @@ class ClaudiaUtils:
         return False
 
     async def AddTraitor(self, member: discord.Member) -> bool:
-        for channel in [
-            await self.TraitorsInstructionsChannel(),
-            await self.TraitorsChatChannel(),
-        ]:
-            if not channel:
-                return False
-            # Grant permission to the user to view the channel
-            await channel.set_permissions(
-                member, view_channel=True, send_messages=False
-            )
+        instructions_channel = await self.TraitorsInstructionsChannel()
+        if not instructions_channel:
+            return False
+        await instructions_channel.set_permissions(
+            member,
+            view_channel=True,
+            send_messages=False,
+            create_public_threads=False,
+            create_private_threads=False,
+        )
+        chat_channel = await self.TraitorsChatChannel()
+        if not chat_channel:
+            return False
+        await chat_channel.set_permissions(
+            member,
+            view_channel=True,
+            send_messages=True,
+        )
 
     async def ClearTraitors(self):
         guild = self.Guild()
