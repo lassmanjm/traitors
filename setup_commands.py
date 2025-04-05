@@ -233,7 +233,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         description="Load the traitors from an encoded string",
         guild=discord.Object(id=guild_id)
     )
-    async def LoadGame(interaction:discord.Interaction, saved_game: str):
+    async def LoadGame(interaction:discord.Interaction, saved_game: str, new_player_traitor_probability: int = 0.22):
         if not await utils.CheckControlChannel(interaction):
             return
         await InitializeImpl(interaction.channel, interaction.user)
@@ -293,6 +293,8 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
                 "These players in the sever were not previously present:"
                 f"\n* {"\n* ".join({ player.name for player in new_players })}.\n\n"
                 )
+            for player in new_players:
+                await AddPlayer(player, new_player_traitor_probability)
         description+="Have fun!"
         await interaction.response.send_message(
             embed=discord.Embed(
@@ -378,7 +380,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
     )
     # Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
     # of .8, this gives the same probability for any new players.
-    async def AddPlayerCmd(ctx: discord.Interaction, player: discord.Member, probability: float = .22):
+    async def AddPlayerCmd(ctx: discord.Interaction, player: discord.Member, traitor_probability: float = .22):
         if not await utils.CheckControlChannel(ctx):
             return
         # await ctx.response.send_message(f"Adding{member.display_name} to the game...")
@@ -393,8 +395,8 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         view = View()
         view.add_item(check_player)
             
-        await ctx.response.send_message(f"Confirm: Add {player.display_name} to the game with {probability} chance of being a traitor?", view=view)
-        check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, player, probability)
+        await ctx.response.send_message(f"Confirm: Add {player.display_name} to the game with {traitor_probability} chance of being a traitor?", view=view)
+        check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, player, traitor_probability)
 
         
     @tree.command(
