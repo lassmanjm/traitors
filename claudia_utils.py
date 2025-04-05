@@ -40,7 +40,7 @@ class ClaudiaUtils:
     return discord.utils.get(guild.text_channels, name=constants.kControlsChannelName)
 
 
-  def DisplayVictims(self, victims: list[str]):
+  def DisplayPlayers(self, victims: list[str]):
     if len(victims) == 1:
         return victims[0]
     if len(victims) ==2:
