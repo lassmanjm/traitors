@@ -130,6 +130,13 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
 
         if accept:
             await utils.AddTraitor(selected_user)
+            await traitors_channel.send(
+                embed=discord.Embed(
+                    title=f"{selected_user.display_name} has accepted the offer.",
+                    description="They have now joined your ranks.",
+                    color=discord.Color.green(),
+                )
+            )
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title=f"🔪 Welcome to the ranks of the traitors",
@@ -137,10 +144,10 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
                     color=discord.Color.purple(),
                 )
             )
-            await traitors_channel.send(
+            traitors_chat_channel = await utils.TraitorsChatChannel()
+            await traitors_chat_channel.send(
                 embed=discord.Embed(
-                    title=f"{selected_user.display_name} has accepted the offer.",
-                    description="They have now joined your ranks.",
+                    title=f"Welcome, {selected_user.display_name}",
                     color=discord.Color.green(),
                 )
             )
