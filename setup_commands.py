@@ -89,8 +89,13 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
 
 
         
-    async def InitializeImpl(output_channel: discord.TextChannel, caller: discord.Member, clear_traitors:bool=True):
+    async def InitializeImpl(output_channel: discord.TextChannel, clear_traitors:bool=True, reset_channels: bool = True):
         guild=utils.Guild()
+
+        if reset_channels:
+            for channel in client.get_guild(guild_id).text_channels:
+                if channel.name != constants.kControlsChannelName:
+                    await channel.delete()
 
         private_channel_permissions = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -137,15 +142,16 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
             
         
     @tree.command(
-        name="initialize",
-        description="Initialize traitors server",
+        name="reset",
+        description="Reset the traitors server",
         guild=discord.Object(id=guild_id)
     )
-    async def Initialize(ctx:discord.Interaction, clear_traitors: bool=False):
+    async def Reset(ctx:discord.Interaction, clear_traitors: bool=False, reset_channels: bool = False):
         if clear_traitors and not await utils.CheckControlChannel(ctx):
             return False
         await ctx.response.send_message("Initializing for new game")
-        await InitializeImpl(ctx.channel, ctx.user, clear_traitors)
+        await InitializeImpl(ctx.channel, clear_traitors, reset_channels)
+
 
     @tree.command(
         name="new_game",
@@ -162,7 +168,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
             return
         await ctx.response.send_message(f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors...")
 
-        await InitializeImpl(ctx.channel,ctx.user)
+        await InitializeImpl(ctx.channel)
 
         traitors=random.sample(list(utils.GetPlayers()),num_traitors)
         for traitor in traitors:
@@ -239,7 +245,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
     async def LoadGame(interaction:discord.Interaction, saved_game: str, new_player_traitor_probability: float = 0.22):
         if not await utils.CheckControlChannel(interaction):
             return
-        await InitializeImpl(interaction.channel, interaction.user)
+        await InitializeImpl(interaction.channel)
 
         async def decode(encoded_text)->dict[str, dict[int, str]]:
             """Decodes the encoded string back to a list of member IDs."""
