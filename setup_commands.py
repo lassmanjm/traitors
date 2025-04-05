@@ -208,6 +208,14 @@ def SetupCommands(
             return
         if not await utils.CheckNumTraitors({min_num_traitors, min_num_traitors + 1}):
             return
+        for player in await utils.GetFaithful():
+            await player.send(
+                embed=discord.Embed(
+                    title="The game has begun!",
+                    description="You are a **faithful**.",
+                    color=discord.Color.purple(),
+                )
+            )
         await ctx.channel.send(
             embed=discord.Embed(
                 title="New game started successfully!", color=discord.Color.green()
