@@ -1,4 +1,3 @@
-
 import discord
 from discord import app_commands
 import constants
@@ -6,7 +5,6 @@ from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
 from num2words import num2words
-import random
 
 def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.Client):
     utils=ClaudiaUtils(client, guild_id)
@@ -34,7 +32,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         await announcements_channel.send(embed=discord.Embed(
             title="The traitors have struck again!",
             description=(
-                f"**{utils.DisplayVictims([victim.display_name for victim in victims])}** "
+                f"**{utils.DisplayPlayers([victim.display_name for victim in victims])}** "
                 f"{"are" if len(victims)>1 else "is"} dead."
             ),
             color=discord.Color.red())
@@ -60,7 +58,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
 
         victims = [client.get_user(int(victim)) for victim in victim_select.values]
         await interaction.response.send_message((
-            f"You have made your selection. **{utils.DisplayVictims([victim.display_name for victim in victims])}** "
+            f"You have made your selection. **{utils.DisplayPlayers([victim.display_name for victim in victims])}** "
             "will no longer be with us."
         ))
         await Kill(victims)
@@ -313,7 +311,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         await interaction.message.edit(view=view)
 
         deathmatch_victims = [client.get_user(int(victim)).display_name for victim in deathmatch_victim_select.values]
-        victims_string=utils.DisplayVictims(deathmatch_victims)
+        victims_string=utils.DisplayPlayers(deathmatch_victims)
         await interaction.response.send_message(f"You have made your selection. **{victims_string}** will be sent to the deathmatch.")
         announcements_channel = await utils.AnnouncementsChannel()
         await announcements_channel.send(embed=discord.Embed(
