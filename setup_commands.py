@@ -233,7 +233,10 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         description="Load the traitors from an encoded string",
         guild=discord.Object(id=guild_id)
     )
-    async def LoadGame(interaction:discord.Interaction, saved_game: str, new_player_traitor_probability: int = 0.22):
+    @app_commands.describe(
+        new_player_traitor_probability="Probability that new players (players not in the game on save) will be added as traitors."
+        )
+    async def LoadGame(interaction:discord.Interaction, saved_game: str, new_player_traitor_probability: float = 0.22):
         if not await utils.CheckControlChannel(interaction):
             return
         await InitializeImpl(interaction.channel, interaction.user)
@@ -284,18 +287,53 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         new_players=current_players - old_players
         description=""
         if missing_players:
-            description+=(
-                "These players are no longer present in the server:"
-                f"\n* {"\n* ".join(missing_players)}.\n\n"
+            await interaction.channel.send(
+                embed=discord.Embed(
+                    title="Missing Players",
+                    description=(
+                        "**__Missing Players__**\n"
+                        "These players are no longer present in the server:"
+                        f"\n* {"\n* ".join(missing_players)}."
+                        ),
+                    color=discord.Color.orange()
+                    ),
                 )
         if new_players:
-            description+=(
-                "These players in the sever were not previously present:"
-                f"\n* {"\n* ".join({ player.name for player in new_players })}.\n\n"
+            add_player = Select(
+                custom_id="add_player",
+                placeholder="Respond",
+                options=[
+                    discord.SelectOption(label="yes", value="yes"),
+                    discord.SelectOption(label="no", value="no"),
+                    ]
                 )
-            for player in new_players:
-                await AddPlayer(player, new_player_traitor_probability)
-        description+="Have fun!"
+            view = View()
+            view.add_item(add_player)
+                
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="New Players",
+                    description=(
+                        "These players in the sever were not previously present:"
+                        f"\n* {"\n* ".join({ player.name for player in new_players })}.\n\n"
+                        f"Add new players to the game with {new_player_traitor_probability} "
+                        "chance of being a traitor? Probability can be altered in load_game command call."
+                        ),
+                    color=discord.Color.orange()
+                    ),
+                view=view
+                )
+            async def Callback(ctx: discord.Interaction):
+                await AddPlayerCallback(ctx, view, new_players, new_player_traitor_probability)
+                await interaction.channel.send(
+                    embed=discord.Embed(
+                        title="Game loaded!",
+                        color=discord.Color.green()
+                        )
+                    )
+
+            add_player.callback = Callback
+            return
         await interaction.response.send_message(
             embed=discord.Embed(
                 title="Game loaded!",
@@ -345,29 +383,30 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         
 
         
-    async def CheckPlayerCallback(interaction: discord.Interaction, view: View,  member: discord.Member, probability: float):
-        check_player_resonse=None
+    async def AddPlayerCallback(interaction: discord.Interaction, view: View,  players: set[discord.Member], probability: float):
+        add_player_resonse=None
         for item in view.children:
-            if item.custom_id=="check_player":
-                check_player_resonse=item
+            if item.custom_id=="add_player":
+                add_player_resonse=item
             
-        check_player_resonse.disabled = True
+        add_player_resonse.disabled = True
         await interaction.message.edit(view=view)
 
-        if check_player_resonse.values[0] == "no":
+        if add_player_resonse.values[0] == "no":
             await interaction.response.send_message(
                 embed=discord.Embed(
-                    title=f"{member.display_name} not added.",
+                    title=f"Players not added.",
                     color=discord.Color.red()
                     )
                 )
             return
 
-        await AddPlayer(member, probability)
+        for player in players:
+            await AddPlayer(player, probability)
 
         await interaction.response.send_message(
             embed=discord.Embed(
-                title=f"{member.display_name} added to game!",
+                title=f"{utils.DisplayPlayers(list(players))} added to game!",
                 color=discord.Color.green()
                 )
             )
@@ -384,8 +423,8 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         if not await utils.CheckControlChannel(ctx):
             return
         # await ctx.response.send_message(f"Adding{member.display_name} to the game...")
-        check_player = Select(
-            custom_id="check_player",
+        add_player = Select(
+            custom_id="add_player",
             placeholder="Respond",
             options=[
                 discord.SelectOption(label="yes", value="yes"),
@@ -393,10 +432,10 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
                 ]
             )
         view = View()
-        view.add_item(check_player)
+        view.add_item(add_player)
             
         await ctx.response.send_message(f"Confirm: Add {player.display_name} to the game with {traitor_probability} chance of being a traitor?", view=view)
-        check_player.callback = lambda ctx: CheckPlayerCallback(ctx, view, player, traitor_probability)
+        add_player.callback = lambda ctx: AddPlayerCallback(ctx, view, {player}, traitor_probability)
 
         
     @tree.command(
