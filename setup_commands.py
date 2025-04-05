@@ -245,8 +245,6 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
             except (binascii.Error, UnicodeDecodeError)  as e:
                 await interaction.response.send_message(embed=utils.Error("Unable to decode saved game. make sure you copied it correctly."))
                 return None
-                
-
         
         missing_players=set()
         old_players=set()
@@ -324,6 +322,27 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
         return
 
 
+    async def AddPlayer(player: discord.Member, probability: float = .22):
+        if random.random() < probability:
+            await utils.AddTraitor(player)
+            await player.send(
+                embed=discord.Embed(
+                    title="Welcome to the game",
+                    description="You are entering as a traitor.",
+                    color=discord.Color.purple()
+                )
+            )
+            return
+        await player.send(
+            embed=discord.Embed(
+                title="Welcome to the game",
+                description="You are entering as a faithful.",
+                color=discord.Color.purple()
+            )
+        )
+        
+
+        
     async def CheckPlayerCallback(interaction: discord.Interaction, view: View,  member: discord.Member, probability: float):
         check_player_resonse=None
         for item in view.children:
@@ -342,8 +361,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
                 )
             return
 
-        if random.random() < probability:
-            await utils.AddTraitor(member)
+        await AddPlayer(member, probability)
 
         await interaction.response.send_message(
             embed=discord.Embed(
@@ -360,7 +378,7 @@ def SetupCommands(tree: app_commands.CommandTree, guild_id: int, client: discord
     )
     # Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
     # of .8, this gives the same probability for any new players.
-    async def AddPlayer(ctx: discord.Interaction, player: discord.Member, probability: float = .22):
+    async def AddPlayerCmd(ctx: discord.Interaction, player: discord.Member, probability: float = .22):
         if not await utils.CheckControlChannel(ctx):
             return
         # await ctx.response.send_message(f"Adding{member.display_name} to the game...")
