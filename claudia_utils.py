@@ -154,7 +154,7 @@ class ClaudiaUtils:
     if not self.IsPlayer(user):
         return False
     traitors_channel = await self.TraitorsInstructionsChannel()
-    if traitors_channel.overwrites[user].view_channel:
+    if traitors_channel.permissions_for(user).view_channel:
         return True
     return False
 
