@@ -31,7 +31,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         announcements_channel = await utils.AnnouncementsChannel()
         await announcements_channel.send(
             embed=discord.Embed(
-                title="The traitors have struck again!",
+                title="The traitors have struck!",
                 description=(
                     f"**{utils.DisplayPlayers([victim.display_name for victim in victims])}** "
                     f"{"are" if len(victims)>1 else "is"} dead."
