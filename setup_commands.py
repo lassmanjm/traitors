@@ -92,8 +92,8 @@ def SetupCommands(
                 traitors,
                 label="I swear",
                 click_response=(
-                    "And with that, you are now a traitor. Go to the traitors "
-                    "chat channel and reveal yourself to your fellow traitors."
+                    "And with that, you are now a traitor. The game will "
+                    "commence when all of the traitors have taken the oath."
                 ),
                 final_announcement=discord.Embed(
                     title="The traitors have been selected",
@@ -107,11 +107,11 @@ def SetupCommands(
             embed=discord.Embed(
                 title="Before you don your cloak, you must take the Traitor's Oath.",
                 description=(
-                    "Do you commit to lying and deceiving your way through this game?\n"
-                    "Do you swear to murder your fellow players throughout the game?\n"
-                    "Do you vow to keep your identity and the identity of your fellow traitors a secret?"
+                    "🔪 Do you commit to lying and deceiving your way through this game?\n\n"
+                    "🔪 Do you swear to murder your fellow players throughout the game?\n\n"
+                    "🔪 Do you vow to keep your identity and the identity of your fellow traitors a secret?"
                 ),
-                color=discord.Color.dark_magenta()
+                color=discord.Color.dark_magenta(),
             ),
             view=view,
         )
@@ -232,10 +232,8 @@ def SetupCommands(
                 embed=discord.Embed(
                     title=f"Congratulations, you have been selected to be a traitor!",
                     description=(
-                        "The traitors private channels are now available to you. "
-                        "Please visit the instructions channel to take your oath "
-                        "and then introduce yourself to your fellow traitors.\n\n"
-                        f"<#{traitors_instructions.id}>\n"
+                        "The traitors private channels are now available to you. You can "
+                        "communicate with your fellow traitors using the private chat channel:\n\n"
                         f"<#{traitors_chat.id}>"
                     ),
                     color=discord.Color.purple(),
@@ -243,6 +241,18 @@ def SetupCommands(
             )
         if not await utils.CheckNumTraitors({min_num_traitors, min_num_traitors + 1}):
             return
+        await traitors_chat.send(
+            embed=discord.Embed(
+                title=f"Welcome traitors",
+                description=(
+                    "You may reveal yourself to your fellow traitors here. "
+                    "When you are ready, visit the traitors instructions channel "
+                    "to take the Traitor's Oath and begin the game.\n\n"
+                    f"<#{traitors_instructions.id}>"
+                ),
+                color=discord.Color.purple(),
+            )
+        )
         for player in await utils.GetFaithful():
             await player.send(
                 embed=discord.Embed(
