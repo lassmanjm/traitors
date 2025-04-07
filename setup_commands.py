@@ -56,10 +56,18 @@ def SetupCommands(
         return
 
     class ConfirmButton(Button):
-        def __init__(self, traitors: set[discord.Member]):
-            super().__init__(label="Click Me", style=discord.ButtonStyle.blurple)
+        def __init__(
+            self,
+            traitors: set[discord.Member],
+            label: str,
+            click_response: str,
+            final_announcement: discord.Embed,
+        ):
+            super().__init__(label=label, style=discord.ButtonStyle.blurple)
             self.traitors_left = traitors
             self.lock = asyncio.Lock()
+            self.click_response = click_response
+            self.final_announcement = final_announcement
 
         async def callback(self, interaction: discord.Interaction):
             async with self.lock:
@@ -68,26 +76,45 @@ def SetupCommands(
                     return
 
                 await interaction.response.send_message(
-                    "Thanks for confirming!", ephemeral=True
+                    self.click_response, ephemeral=True
                 )
                 self.traitors_left.discard(interaction.user)
                 if len(self.traitors_left) == 0:
                     announcements_channel = await utils.AnnouncementsChannel()
-                    await announcements_channel.send(
-                        embed=discord.Embed(
-                            title="The traitors have been selected",
-                            description="Let the game begin.",
-                            color=discord.Color.purple(),
-                        )
-                    )
+                    await announcements_channel.send(embed=self.final_announcement)
                     self.disabled = True
                     await interaction.message.edit(view=self.view)
 
     async def ConfirmTraitors(traitors: set[discord.Member]):
         view = View()
-        view.add_item(ConfirmButton(traitors))
+        view.add_item(
+            ConfirmButton(
+                traitors,
+                label="I swear",
+                click_response=(
+                    "And with that, you are now a traitor. Go to the traitors "
+                    "chat channel and reveal yourself to your fellow traitors."
+                ),
+                final_announcement=discord.Embed(
+                    title="The traitors have been selected",
+                    description="Let the game begin.",
+                    color=discord.Color.purple(),
+                ),
+            )
+        )
         instructions_channel = await utils.TraitorsInstructionsChannel()
-        await instructions_channel.send("comfirm", view=view)
+        await instructions_channel.send(
+            embed=discord.Embed(
+                title="Before you don your cloak, you must take the Traitor's Oath.",
+                description=(
+                    "Do you commit to lying and deceiving your way through this game?\n"
+                    "Do you swear to murder your fellow players throughout the game?\n"
+                    "Do you vow to keep your identity and the identity of your fellow traitors a secret?"
+                ),
+                color=discord.Color.dark_magenta()
+            ),
+            view=view,
+        )
 
     async def InitializeImpl(
         output_channel: discord.TextChannel,
@@ -109,19 +136,21 @@ def SetupCommands(
         # Create controls channel
         controls_channel = utils.ControlsChannel()
         if not controls_channel:
-            await output_channel.send("Creating controls channel")
             controls_channel = await guild.create_text_channel(
                 constants.kControlsChannelName, overwrites=private_channel_permissions
             )
 
         # Create read only announcements channel that only Claudia can send messages to
         read_only = {
-            guild.default_role: discord.PermissionOverwrite(send_messages=False),
+            guild.default_role: discord.PermissionOverwrite(
+                send_messages=False,
+                create_public_threads=False,
+                create_private_threads=False,
+            ),
             guild.me: discord.PermissionOverwrite(send_messages=True),
         }
         announcements_channel = await utils.AnnouncementsChannel(send_error=False)
         if not announcements_channel:
-            await output_channel.send("Creating announcements channel")
             announcements_channel = await guild.create_text_channel(
                 constants.kAnnouncementsChannelName, overwrites=read_only
             )
@@ -131,7 +160,6 @@ def SetupCommands(
             send_error=False
         )
         if not traitors_instructions_channel:
-            await output_channel.send("Creating traitors-instructions channel")
             traitors_instructions_channel = await guild.create_text_channel(
                 constants.kTraitorsInstructionsChannelName,
                 overwrites=private_channel_permissions,
@@ -139,7 +167,6 @@ def SetupCommands(
 
         traitors_chat_channel = await utils.TraitorsChatChannel(send_error=False)
         if not traitors_chat_channel:
-            await output_channel.send("Creating traitors-chat channel")
             traitors_chat_channel = await guild.create_text_channel(
                 constants.kTraitorsChatChannelName,
                 overwrites=private_channel_permissions,
@@ -193,19 +220,27 @@ def SetupCommands(
 
         await InitializeImpl(ctx.channel)
 
+        traitors_instructions = await utils.TraitorsInstructionsChannel()
+        traitors_chat = await utils.TraitorsChatChannel()
+        if not traitors_instructions or not traitors_chat:
+            return
+
         traitors = random.sample(list(utils.GetPlayers()), num_traitors)
         for traitor in traitors:
             await utils.AddTraitor(traitor)
             await traitor.send(
                 embed=discord.Embed(
                     title=f"Congratulations, you have been selected to be a traitor!",
-                    description="The traitors private channels are now available for communication and instructions.",
+                    description=(
+                        "The traitors private channels are now available to you. "
+                        "Please visit the instructions channel to take your oath "
+                        "and then introduce yourself to your fellow traitors.\n\n"
+                        f"<#{traitors_instructions.id}>\n"
+                        f"<#{traitors_chat.id}>"
+                    ),
                     color=discord.Color.purple(),
                 )
             )
-        traitors_instructions = await utils.TraitorsInstructionsChannel()
-        if not traitors_instructions:
-            return
         if not await utils.CheckNumTraitors({min_num_traitors, min_num_traitors + 1}):
             return
         for player in await utils.GetFaithful():
@@ -492,6 +527,59 @@ def SetupCommands(
         )
         add_player.callback = lambda ctx: AddPlayerCallback(
             ctx, view, {player}, traitor_probability
+        )
+
+    async def DmButtonCallback(interaction: discord.Interaction, button: Button):
+        await utils.AddTraitor(interaction.user)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Well done!",
+                description=(
+                    "You have now been added to the traitors instructions and chat channels. "
+                    f"Visit the instructions channel for further *instructions*."
+                ),
+                color=discord.Color.green(),
+            )
+        )
+        button.disabled = True
+
+    @tree.command(
+        name="demo",
+        description="Demonstrate the DM and private traitors channel for all players.",
+        guild=discord.Object(id=guild_id),
+    )
+    async def Demo(ctx: discord.Interaction):
+        if not await utils.CheckControlChannel(ctx):
+            return
+        await ctx.response.send_message(
+            embed=discord.Embed(title="Demo started!", color=discord.Color.green())
+        )
+        await InitializeImpl(ctx.channel, clear_traitors=True, reset_channels=True)
+        for player in utils.GetPlayers():
+            dm_button = Button(style=discord.ButtonStyle.blurple)
+            dm_button.label = "Click Me!"
+            dm_button.callback = lambda interaction: DmButtonCallback(
+                interaction, dm_button
+            )
+            view = View()
+            view.add_item(dm_button)
+            await player.send("Please confirm you have seen this DM:", view=view)
+        view = View()
+        view.add_item(
+            ConfirmButton(
+                utils.GetPlayers(),
+                label="Click Me!",
+                click_response="Great work! Hold tight while everyone completes this.",
+                final_announcement=discord.Embed(
+                    title="Everyone has confirmed",
+                    description="Let's play!",
+                    color=discord.Color.green(),
+                ),
+            )
+        )
+        traitors_channel = await utils.TraitorsInstructionsChannel()
+        await traitors_channel.send(
+            "Please confirm you've seen the traitors channels:", view=view
         )
 
     @tree.command(
