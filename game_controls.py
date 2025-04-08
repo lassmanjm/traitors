@@ -5,6 +5,7 @@ from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
 from num2words import num2words
+import math
 
 
 def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.Client):
@@ -429,3 +430,54 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             ctx, view, num_players, num_victims
         )
         await ctx.response.send_message("Death Match initiated")
+
+    def CountdownMessage(sec_left: int, length_sec: int) -> discord.Embed:
+        minutes, seconds = (length_sec // 60, length_sec % 60)
+        length_string = f"{f"{minutes} minute{"s" if minutes > 1 else ""}" if minutes > 0 else ""}{" and " if minutes > 0 and seconds > 0 else ""}{f"{seconds} second{"s" if seconds > 1 else ""}" if seconds > 0 else ""}"
+
+        minutes, seconds = (sec_left // 60, sec_left % 60)
+        if sec_left == 0:
+            return discord.Embed(
+                title="Round Table",
+                description=f"Players, welcome to the round table. This is your only oppurtunity to strike back at the traitors. You have {length_string}. Good luck.\n⏰ Time's up!",
+                color=discord.Color.red(),
+            )
+
+        return discord.Embed(
+            title="Round Table",
+            description=f"Players, welcome to the round table. This is your only oppurtunity to strike back at the traitors. You have {length_string}. Good luck.\n⏳ Time left: {minutes}:{seconds:02}",
+            color=discord.Color.purple(),
+        )
+
+    @tree.command(
+        name="round_table",
+        description="Initiate a round table",
+        guild=discord.Object(id=guild_id),
+    )
+    async def RoundTable(ctx: discord.Interaction, length_min: float = 5.0):
+        if not await utils.CheckControlChannel(ctx):
+            return
+        length_sec = math.floor(length_min * 60)
+        if length_sec <= 0:
+            await ctx.response.send_message(
+                embed=utils.Error("The countdown must be longer than 0 seconds!")
+            )
+            return
+
+        channel = await utils.AnnouncementsChannel()
+
+        await ctx.response.send_message(
+            f"Starting round table for {length_sec} seconds"
+        )
+
+        sec_left = length_sec
+        countdown_message = await channel.send(
+            embed=CountdownMessage(sec_left, length_sec)
+        )
+
+        while sec_left > 0:
+            sec_left -= 1
+            await countdown_message.edit(embed=CountdownMessage(sec_left, length_sec))
+            await asyncio.sleep(1)
+
+        await channel.send("The time for talk is now over. ")
