@@ -193,7 +193,7 @@ def SetupCommands(
     ):
         if clear_traitors and not await utils.CheckControlChannel(ctx):
             return False
-        await ctx.response.send_message("Initializing for new game")
+        await ctx.response.send_message("Initializing server...")
         await InitializeImpl(ctx.channel, clear_traitors, reset_channels)
 
     @tree.command(
@@ -568,6 +568,7 @@ def SetupCommands(
     async def Demo(ctx: discord.Interaction):
         if not await utils.CheckControlChannel(ctx):
             return
+        await ctx.response.defer()
         await InitializeImpl(ctx.channel, clear_traitors=True, reset_channels=True)
         failed = []
         for player in utils.GetPlayers():
@@ -588,7 +589,7 @@ def SetupCommands(
                 await ctx.channel.send(f"Failed to send DM to {player.name}: {e}")
 
         num_failed = len(failed)
-        await ctx.response.send_message(
+        await ctx.followup.send(
             embed=discord.Embed(
                 title="DMs failed" if num_failed > 0 else "DMs successful",
                 description=(
