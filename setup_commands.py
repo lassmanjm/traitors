@@ -629,3 +629,12 @@ def SetupCommands(
     async def ClearAllTraitors(ctx: discord.Interaction):
         await utils.ClearTraitors()
         await ctx.response.send_message("All traitors removed.")
+
+    @tree.command(
+        name="delete_messsages",
+        description="Delete messages in channel",
+    )
+    async def DeleteMessages(ctx, limit:int=500):
+        await ctx.response.send_message(f"Deleting {limit} messages...", delete_after=2)  # Auto-delete the confirmation message
+        await asyncio.sleep(3)
+        await ctx.channel.purge(limit=limit)
