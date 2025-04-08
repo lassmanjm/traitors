@@ -11,6 +11,12 @@ class ClaudiaUtils:
     def Guild(self) -> discord.Guild | None:
         return self.client.get_guild(self.guild_id)
 
+    def GeneralChannel(self) -> discord.TextChannel | None:
+        guild = self.Guild()
+        return discord.utils.get(
+            guild.text_channels, name=constants.kGeneralChannelName
+        )
+
     async def AnnouncementsChannel(
         self, send_error: bool = True
     ) -> discord.TextChannel | None:

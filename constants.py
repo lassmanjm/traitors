@@ -1,3 +1,4 @@
+kGeneralChannelName="general"
 kAnnouncementsChannelName="announcements"
 kControlsChannelName="controls"
 kTraitorsInstructionsChannelName="traitors-instructions"

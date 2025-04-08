@@ -133,6 +133,13 @@ def SetupCommands(
             guild.me: discord.PermissionOverwrite(view_channel=True),
         }
 
+        # Create general channel
+        general_channel = utils.GeneralChannel()
+        if not general_channel:
+            general_channel = await guild.create_text_channel(
+                constants.kGeneralChannelName
+            )
+
         # Create controls channel
         controls_channel = utils.ControlsChannel()
         if not controls_channel:
