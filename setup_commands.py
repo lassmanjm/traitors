@@ -568,10 +568,8 @@ def SetupCommands(
     async def Demo(ctx: discord.Interaction):
         if not await utils.CheckControlChannel(ctx):
             return
-        await ctx.response.send_message(
-            embed=discord.Embed(title="Demo started!", color=discord.Color.green())
-        )
         await InitializeImpl(ctx.channel, clear_traitors=True, reset_channels=True)
+        failed = []
         for player in utils.GetPlayers():
             dm_button = Button(style=discord.ButtonStyle.blurple)
             dm_button.label = "Click Me!"
@@ -580,7 +578,31 @@ def SetupCommands(
             )
             view = View()
             view.add_item(dm_button)
-            await player.send("Please confirm you have seen this DM:", view=view)
+            try:
+                await player.send("Please confirm you have seen this DM:", view=view)
+
+            except discord.Forbidden:
+                failed.append(player.name)
+            except discord.HTTPException as e:
+                failed.append(player.name)
+                await ctx.channel.send(f"Failed to send DM to {player.name}: {e}")
+
+        num_failed = len(failed)
+        await ctx.response.send_message(
+            embed=discord.Embed(
+                title="DMs failed" if num_failed > 0 else "DMs successful",
+                description=(
+                    f"Failed to send to {num_failed} user(s):\n{"\n".join([f"* {failure}" for failure in failed])}"
+                    if num_failed > 0
+                    else ""
+                ),
+                color=(
+                    discord.Color.red() if num_failed > 0 else discord.Color.green()
+                ),
+            )
+        )
+        if num_failed > 0:
+            return
         view = View()
         view.add_item(
             ConfirmButton(
