@@ -175,11 +175,11 @@ def SetupCommands(
             await utils.ClearTraitors()
 
     @tree.command(
-        name="reset",
+        name="initialize",
         description="Reset the traitors server",
         guild=discord.Object(id=guild_id),
     )
-    async def Reset(
+    async def Initialize(
         ctx: discord.Interaction,
         clear_traitors: bool = False,
         reset_channels: bool = False,
