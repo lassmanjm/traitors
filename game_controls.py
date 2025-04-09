@@ -431,6 +431,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         )
         await ctx.response.send_message("Death Match initiated")
 
+    # ----------------------------------------[ Round Table ]----------------------------------------
     def CountdownMessage(sec_left: int, length_sec: int) -> discord.Embed:
         minutes, seconds = (length_sec // 60, length_sec % 60)
         length_string = f"{f"{minutes} minute{"s" if minutes > 1 else ""}" if minutes > 0 else ""}{" and " if minutes > 0 and seconds > 0 else ""}{f"{seconds} second{"s" if seconds > 1 else ""}" if seconds > 0 else ""}"
