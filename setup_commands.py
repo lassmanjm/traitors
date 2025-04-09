@@ -118,15 +118,19 @@ def SetupCommands(
 
     async def InitializeImpl(
         output_channel: discord.TextChannel,
-        clear_traitors: bool = True,
-        reset_channels: bool = True,
+        reset: bool = True,
     ):
         guild = utils.Guild()
 
-        if reset_channels:
+        if reset:
             for channel in client.get_guild(guild_id).text_channels:
                 if channel.name != constants.kControlsChannelName:
                     await channel.delete()
+            banished_role = discord.utils.get(guild.roles, name=constants.kBanishedRoleName)
+            if banished_role:
+                for player in utils.GetPlayers():
+                    # if banished_role in player.roles:
+                    await player.remove_roles(banished_role)
 
         private_channel_permissions = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -178,8 +182,6 @@ def SetupCommands(
                 constants.kTraitorsChatChannelName,
                 overwrites=private_channel_permissions,
             )
-        if clear_traitors:
-            await utils.ClearTraitors()
 
     @tree.command(
         name="initialize",
@@ -188,13 +190,13 @@ def SetupCommands(
     )
     async def Initialize(
         ctx: discord.Interaction,
-        clear_traitors: bool = False,
-        reset_channels: bool = False,
+        reset: bool = False,
     ):
-        if clear_traitors and not await utils.CheckControlChannel(ctx):
+        if reset and not await utils.CheckControlChannel(ctx):
             return False
         await ctx.response.send_message("Initializing server...")
-        await InitializeImpl(ctx.channel, clear_traitors, reset_channels)
+        await InitializeImpl(ctx.channel, reset)
+        await ctx.edit_original_response(content="Server initialized!")
 
     @tree.command(
         name="new_game",
@@ -569,7 +571,7 @@ def SetupCommands(
         if not await utils.CheckControlChannel(ctx):
             return
         await ctx.response.defer()
-        await InitializeImpl(ctx.channel, clear_traitors=True, reset_channels=True)
+        await InitializeImpl(ctx.channel, reset=True)
         failed = []
         for player in utils.GetPlayers():
             dm_button = Button(style=discord.ButtonStyle.blurple)
