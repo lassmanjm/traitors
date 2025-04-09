@@ -295,12 +295,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await asyncio.sleep(10)
             await RecruitComplete()
 
-    @tree.command(
-        name="recruit",
-        description="Send instructions to recruit",
-        guild=discord.Object(id=guild_id),
-    )
-    async def Recruit(ctx: discord.Interaction, force: bool = False):
+    async def RecruitImpl(force: bool = False):
         traitors_channel = await utils.TraitorsInstructionsChannel()
         if force:
             await traitors_channel.send(
@@ -311,7 +306,6 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
                 ),
             )
             await InitiateRecruit(force=True)
-            await ctx.response.send_message("Recruit initiated.")
             return
         # TODO: change var name
         user_options = [
@@ -335,7 +329,80 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         await traitors_channel.send(f"Would you like to recruit?", view=view)
 
         recruit_select.callback = lambda ctx: RecruitDecideCallback(ctx, view)
+
+    @tree.command(
+        name="recruit",
+        description="Send instructions to recruit",
+        guild=discord.Object(id=guild_id),
+    )
+    async def Recruit(ctx: discord.Interaction, force: bool = False):
         await ctx.response.send_message("Recruit initiated.")
+        await RecruitImpl(force)
+
+    async def BanishCallback(
+        interaction: discord.Interaction,
+        view: View,
+        player: discord.Member,
+    ):
+        banish_resonse = None
+        for item in view.children:
+            if item.custom_id == "banish_player":
+                banish_resonse = item
+
+        banish_resonse.disabled = True
+        await interaction.message.edit(view=view)
+
+        if banish_resonse.values[0] == "no":
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title=f"{player.display_name} was not banished.",
+                    color=discord.Color.red(),
+                )
+            )
+            return
+        guild = utils.Guild()
+        role = discord.utils.get(guild.roles, name=constants.kBanishedRoleName)
+        if not role:
+            role = await guild.create_role(name=constants.kBanishedRoleName)
+        await player.add_roles(role)
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title=f"{player.display_name} has been banished",
+                color=discord.Color.green(),
+            )
+        )
+
+    # ----------------------------------------[ Banish ]----------------------------------------
+    @tree.command(
+        name="banish",
+        description="Banish a player.",
+        guild=discord.Object(id=guild_id),
+    )
+    async def Banish(
+        interaction: discord.Interaction,
+        player: discord.Member,
+        more_murders: bool = True,
+    ):
+        if not await utils.CheckControlChannel(interaction):
+            return
+
+        banish_player = Select(
+            custom_id="banish_player",
+            placeholder="Respond",
+            options=[
+                discord.SelectOption(label="yes", value="yes"),
+                discord.SelectOption(label="no", value="no"),
+            ],
+        )
+        view = View()
+        view.add_item(banish_player)
+
+        await interaction.response.send_message(
+            f"Confirm: Banish {player.display_name}?",
+            view=view,
+        )
+        banish_player.callback = lambda ctx: BanishCallback(ctx, view, player)
 
     # ----------------------------------------[ Deathmatch ]----------------------------------------
     async def DeathmatchVictimSelectCallback(
