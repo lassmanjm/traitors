@@ -126,7 +126,9 @@ def SetupCommands(
             for channel in client.get_guild(guild_id).text_channels:
                 if channel.name != constants.kControlsChannelName:
                     await channel.delete()
-            banished_role = discord.utils.get(guild.roles, name=constants.kBanishedRoleName)
+            banished_role = discord.utils.get(
+                guild.roles, name=constants.kBanishedRoleName
+            )
             if banished_role:
                 for player in utils.GetPlayers():
                     # if banished_role in player.roles:
@@ -637,7 +639,9 @@ def SetupCommands(
         name="delete_messsages",
         description="Delete messages in channel",
     )
-    async def DeleteMessages(ctx, limit:int=500):
-        await ctx.response.send_message(f"Deleting {limit} messages...", delete_after=2)  # Auto-delete the confirmation message
+    async def DeleteMessages(ctx, limit: int = 500):
+        await ctx.response.send_message(
+            f"Deleting {limit} messages...", delete_after=2
+        )  # Auto-delete the confirmation message
         await asyncio.sleep(3)
         await ctx.channel.purge(limit=limit)
