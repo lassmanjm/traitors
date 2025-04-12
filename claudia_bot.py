@@ -2,12 +2,7 @@ from absl import app
 from absl import flags
 import discord
 from discord import app_commands
-from discord.ui import Select, View, Button
-import asyncio
-import math
-from num2words import num2words
 import os
-import random
 
 import setup_commands
 import game_controls
