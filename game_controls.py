@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-import constants
+from game import constants
 from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
@@ -54,6 +54,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
                         color=discord.Color.purple(),
                     )
                 )
+            # TODO: Replace with error func
             except Exception as e:
                 await ctx.followup.send(
                     embed=discord.Embed(
@@ -74,7 +75,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             description="Wipe Claudia's memory (reset conversation context)",
             guild=discord.Object(id=guild_id),
         )
-        async def HeyClaudia(ctx: discord.Interaction):
+        async def ResetClaudia(ctx: discord.Interaction):
             conversation.reset_context()
             await ctx.response.send_message("Memory wiped", ephemeral=True)
 

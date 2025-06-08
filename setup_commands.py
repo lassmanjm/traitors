@@ -1,8 +1,7 @@
 import discord
 from discord import app_commands
-import constants
+from game import constants
 import contextlib
-import tempfile
 from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
@@ -14,18 +13,36 @@ import json
 from datetime import datetime
 import os
 import io
+from dataclasses import dataclass
+from enum import Enum
+import pickle
+
+
+class PlayerStatus(Enum):
+    ACTIVE = "active"
+    DEAD = "dead"
+    BANISHED = "banished"
+
+
+@dataclass
+class Player:
+    id: int
+    name: str
+    display_name: str
+    is_traitor: bool
+    status: PlayerStatus
 
 
 @contextlib.contextmanager
 def maybe_in_mem_file(file_name, content):
     try:
         file_path = os.path.join("/saved_games", file_name)
-        with open(file_path, "w") as f:
+        with open(file_path, "wb") as f:
             f.write(content)
         with open(file_path, "rb") as f:
             yield discord.File(f)
     except Exception:
-        f = io.StringIO(content)
+        f = io.BytesIO(content)
         yield discord.File(f, filename=file_name)
 
 
@@ -294,6 +311,19 @@ def SetupCommands(
         )
         await ConfirmTraitors(await utils.GetTraitors())
 
+    class AttachmentView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+
+        @discord.ui.button(
+            label="Load Game", style=discord.ButtonStyle.primary, custom_id="load_game"
+        )
+        async def process_attachment(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ) -> discord.Attachment:
+            # return interaction.message.attachments[0]
+            await interaction.response.send_message("hi")
+
     @tree.command(
         name="save_game",
         description="Save the traitors as an encoded string",
@@ -301,19 +331,27 @@ def SetupCommands(
     )
     async def SaveGame(interaction: discord.Interaction, name: str = ""):
         def encode(players: dict) -> str:
-            string = json.dumps(players)
-            return base64.urlsafe_b64encode(string.encode()).decode()
+            pickled_data = pickle.dumps(players)
+            return base64.urlsafe_b64encode(pickled_data)
 
-        players = {
-            "faithful": {
-                member.id: member.name for member in await utils.GetFaithful()
-            },
-            "traitor": {member.id: member.name for member in await utils.GetTraitors()},
-            "banished": {
-                member.id: member.name for member in await utils.GetBanished()
-            },
-            "dead": {member.id: member.name for member in await utils.GetDead()},
-        }
+        players = [
+            Player(
+                id=member.id,
+                name=member.name,
+                display_name=member.display_name,
+                is_traitor=await utils.IsTraitor(member, include_banished=True),
+                status=(
+                    PlayerStatus.DEAD
+                    if await utils.IsDead(member)
+                    else (
+                        PlayerStatus.BANISHED
+                        if await utils.IsBanished(member)
+                        else PlayerStatus.ACTIVE
+                    )
+                ),
+            )
+            for member in await utils.GetPlayers(include_out_players=True)
+        ]
 
         saved_game = encode(players)
         date = datetime.now().strftime("%m-%d-%Y")
@@ -322,7 +360,7 @@ def SetupCommands(
 
         description = (
             f"A game has been saved with the following players:"
-            f"\n* {"\n* ".join([ player.name for player in await utils.GetPlayers()])}.\n\n"
+            f"\n* {"\n* ".join([ f"{player.display_name} ({player.name})" for player in await utils.GetPlayers()])}.\n\n"
             "Attach the file to the `/load_game` command to load game."
         )
         with maybe_in_mem_file(file_name, content=saved_game) as file:
@@ -333,6 +371,7 @@ def SetupCommands(
                     color=discord.Color.green(),
                 ),
                 file=file,
+                view=AttachmentView(),
             )
         with maybe_in_mem_file(file_name, content=saved_game) as file:
             await interaction.user.send(
@@ -342,6 +381,7 @@ def SetupCommands(
                     color=discord.Color.green(),
                 ),
                 file=file,
+                view=AttachmentView(),
             )
 
     @tree.command(
@@ -362,17 +402,16 @@ def SetupCommands(
         await interaction.response.defer()
         await InitializeImpl(interaction.channel)
 
-        async def decode(saved_game) -> dict[str, dict[int, str]]:
+        async def decode(saved_game: discord.Attachment) -> list[Player]:
             """Decodes the encoded string back to a list of member IDs."""
+            encoded_text = await saved_game.read()
+            return pickle.loads(base64.urlsafe_b64decode(encoded_text))
             try:
-                encoded_text = (await saved_game.read()).decode("utf-8")
-                return json.loads(
-                    base64.urlsafe_b64decode(encoded_text.strip("`").encode()).decode()
-                )
+                pass
             except (binascii.Error, UnicodeDecodeError) as e:
                 await interaction.followup.send(
                     embed=utils.Error(
-                        "Unable to decode saved game. The file may be corrupted."
+                        f"Unable to decode saved game. The file may be corrupted.\n\n{e}"
                     )
                 )
                 return None
@@ -381,6 +420,8 @@ def SetupCommands(
         old_players = set()
         guild = utils.Guild()
         decoded_game = await decode(saved_game)
+        await interaction.followup.send(f"{decoded_game}")
+        return
         if not decoded_game:
             return
         for id, name in decoded_game["traitor"].items():
