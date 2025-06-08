@@ -1,5 +1,5 @@
 import discord
-import constants
+from game import constants
 
 
 class ClaudiaUtils:

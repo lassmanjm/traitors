@@ -1,7 +1,7 @@
 from openai import OpenAI
 import os
 from absl import flags
-import constants
+from game import constants
 
 
 FLAGS = flags.FLAGS
