@@ -6,6 +6,12 @@ from discord.ui import Select, View, Button
 import asyncio
 from num2words import num2words
 import math
+import random
+import chat_gpt_claudia
+import os
+from absl import flags
+
+FLAGS = flags.FLAGS
 
 
 def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.Client):
@@ -27,8 +33,58 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             )
         )
 
+    # Flags overwrite environment variables
+    if FLAGS.openai_api_key:
+        os.environ["OPENAI_API_KEY"] = FLAGS.openai_api_key
+    if os.environ.get("OPENAI_API_KEY"):
+        conversation = chat_gpt_claudia.Conversation()
+
+        @tree.command(
+            name="hey_cluadia",
+            description="Talk to Claudia",
+            guild=discord.Object(id=guild_id),
+        )
+        async def HeyClaudia(ctx: discord.Interaction, message: str):
+            await ctx.response.defer()
+            try:
+                await ctx.followup.send(
+                    embed=discord.Embed(
+                        title=message,
+                        description=conversation.send_message(message),
+                        color=discord.Color.purple(),
+                    )
+                )
+            except Exception as e:
+                await ctx.followup.send(
+                    embed=discord.Embed(
+                        title="Chat gpt connection error",
+                        color=discord.Color.red(),
+                    )
+                )
+                await utils.ControlsChannel().send(
+                    embed=discord.Embed(
+                        title="Chat gpt connection error",
+                        description=str(e),
+                        color=discord.Color.red(),
+                    )
+                )
+
+        @tree.command(
+            name="reset_cluadia",
+            description="Wipe Claudia's memory (reset conversation context)",
+            guild=discord.Object(id=guild_id),
+        )
+        async def HeyClaudia(ctx: discord.Interaction):
+            conversation.reset_context()
+            await ctx.response.send_message("Memory wiped", ephemeral=True)
+
     # ----------------------------------------[ Murder ]----------------------------------------
     async def Kill(victims: list[discord.User]):
+        for victim in victims:
+            guild = utils.Guild()
+            victim_member = await guild.fetch_member(victim.id)
+            await victim_member.add_roles(await utils.DeadRole())
+
         announcements_channel = await utils.AnnouncementsChannel()
         await announcements_channel.send(
             embed=discord.Embed(
@@ -51,7 +107,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title="Failed to select victim.",
-                    description="Ask for help by using the `/help` command.",
+                    description="Ask for help by using the `/anonymous` command.",
                     color=discord.Color.red(),
                 )
             )
@@ -188,7 +244,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title="Failed to select recruit.",
-                    description="Ask for help by using the `/help` command.",
+                    description="Ask for help by using the `/anonymous` command.",
                     color=discord.Color.red(),
                 )
             )
@@ -242,7 +298,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await traitors_channel.send(
                 embed=discord.Embed(
                     title="Recruitment Error! ",
-                    description="User not found. Ask for help with the `/help` command.",
+                    description="User not found. Ask for help with the `/anonymous` command.",
                     color=discord.Color.red(),
                 )
             )
@@ -275,7 +331,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title="Selection failed",
-                    description="Ask for help by using the `/help` command.",
+                    description="Ask for help by using the `/anonymous` command.",
                     color=discord.Color.red(),
                 )
             )
@@ -339,10 +395,13 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         await ctx.response.send_message("Recruit initiated.")
         await RecruitImpl(force)
 
+    # ----------------------------------------[ Banish ]----------------------------------------
     async def BanishCallback(
         interaction: discord.Interaction,
         view: View,
         player: discord.Member,
+        recruit_chance: float,
+        more_murders: bool,
     ):
         banish_resonse = None
         for item in view.children:
@@ -360,11 +419,20 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
                 )
             )
             return
-        guild = utils.Guild()
-        role = discord.utils.get(guild.roles, name=constants.kBanishedRoleName)
-        if not role:
-            role = await guild.create_role(name=constants.kBanishedRoleName)
-        await player.add_roles(role)
+
+        recruit = (
+            random.random() < recruit_chance
+            and await utils.IsTraitor(player)
+            and more_murders
+        )
+
+        banished_role = await utils.BanishedRole()
+        if banished_role in player.roles:
+            await interaction.response.send_message(
+                embed=utils.Error(f"{player.display_name} has already been banished.")
+            )
+            return
+        await player.add_roles(banished_role)
 
         await interaction.response.send_message(
             embed=discord.Embed(
@@ -372,16 +440,27 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
                 color=discord.Color.green(),
             )
         )
+        traitors = await utils.GetTraitors()
+        force_recruit = len(traitors) == 1 and more_murders
+        if force_recruit or recruit:
+            await RecruitImpl(force=force_recruit)
 
-    # ----------------------------------------[ Banish ]----------------------------------------
     @tree.command(
         name="banish",
         description="Banish a player.",
         guild=discord.Object(id=guild_id),
     )
+    @app_commands.describe(
+        recruit_chance=(
+            "The probability that the traitors will be allowed to "
+            "attempt to recruit on banishment of a traitor [ default 0.5 ]"
+        ),
+        more_murders="Whether there will be any more murders in the game [ default True ]",
+    )
     async def Banish(
         interaction: discord.Interaction,
         player: discord.Member,
+        recruit_chance: float = 0.5,
         more_murders: bool = True,
     ):
         if not await utils.CheckControlChannel(interaction):
@@ -402,7 +481,9 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             f"Confirm: Banish {player.display_name}?",
             view=view,
         )
-        banish_player.callback = lambda ctx: BanishCallback(ctx, view, player)
+        banish_player.callback = lambda ctx: BanishCallback(
+            ctx, view, player, recruit_chance, more_murders
+        )
 
     # ----------------------------------------[ Deathmatch ]----------------------------------------
     async def DeathmatchVictimSelectCallback(
@@ -416,7 +497,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title="Failed to select deathmatch victim.",
-                    description="Ask for help by using the `/help` command.",
+                    description="Ask for help by using the `/anonymous` command.",
                     color=discord.Color.red(),
                 )
             )
@@ -451,7 +532,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
         ctx: discord.Interaction, num_players: int = 4, num_victims: int = 1
     ):
         traitors_channel = await utils.TraitorsInstructionsChannel()
-        players = utils.GetPlayers()
+        players = await utils.GetPlayers()
         if num_players > len(players):
             await ctx.response.send_message(
                 embed=utils.Error(
@@ -471,7 +552,7 @@ def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.
 
         user_options = [
             discord.SelectOption(label=member.display_name, value=member.id)
-            for member in utils.GetPlayers()
+            for member in players
         ]
         deathmatch_victim_select = Select(
             custom_id="deathmatch_victim_select",

@@ -62,6 +62,19 @@ class ClaudiaUtils:
             guild.text_channels, name=constants.kControlsChannelName
         )
 
+    async def GetRole(self, role_name: str) -> discord.Role:
+        guild = self.Guild()
+        role = discord.utils.get(guild.roles, name=role_name)
+        if not role:
+            role = await guild.create_role(name=role_name)
+        return role
+
+    async def BanishedRole(self) -> discord.Role:
+        return await self.GetRole(role_name=constants.kBanishedRoleName)
+
+    async def DeadRole(self) -> discord.Role:
+        return await self.GetRole(role_name=constants.kDeadRoleName)
+
     def DisplayPlayers(self, victims: list[str]):
         if len(victims) == 1:
             return victims[0]
@@ -127,6 +140,7 @@ class ClaudiaUtils:
             view_channel=True,
             send_messages=True,
         )
+        return True
 
     async def ClearTraitors(self):
         guild = self.Guild()
@@ -143,7 +157,6 @@ class ClaudiaUtils:
                     )
 
     async def CheckNumTraitors(self, valid_nums: set[int]) -> bool:
-        guild = self.Guild()
         instructions_channel = await self.TraitorsInstructionsChannel()
         chat_channel = await self.TraitorsChatChannel()
         if not instructions_channel:
@@ -152,7 +165,7 @@ class ClaudiaUtils:
             return False
         num_instructions_members = 0
         num_chat_members = 0
-        for player in self.GetPlayers():
+        for player in await self.GetPlayers():
             if instructions_channel.permissions_for(player).view_channel:
                 num_instructions_members += 1
             if chat_channel.permissions_for(player).view_channel:
@@ -165,34 +178,82 @@ class ClaudiaUtils:
             return False
         return True
 
-    def IsPlayer(self, user: discord.Member) -> bool:
+    async def IsBanished(self, player: discord.Member) -> bool:
+        banished_role = await self.BanishedRole()
+        if banished_role in player.roles:
+            return True
+        return False
+
+    async def IsDead(self, player: discord.Member) -> bool:
+        dead_role = await self.DeadRole()
+        if dead_role in player.roles:
+            return True
+        return False
+
+    async def IsOut(self, player: discord.Member) -> bool:
+        return await self.IsDead(player) or await self.IsBanished(player)
+
+    async def IsPlayer(
+        self, user: discord.Member, include_out_players: bool = False
+    ) -> bool:
         """Check if member is human player."""
         guild = self.Guild()
+        # User is bot or guild owner
         if user in {guild.me, guild.owner}:
+            return False
+        if not include_out_players and await self.IsOut(user):
             return False
         return True
 
-    def GetPlayers(self) -> set[discord.Member]:
+    async def GetPlayers(
+        self, include_out_players: bool = False
+    ) -> set[discord.Member]:
         """Return all players of the game as discord.Member objects."""
         guild = self.Guild()
         players = set()
         for member in guild.members:
-            if self.IsPlayer(member):
+            if await self.IsPlayer(member, include_out_players):
                 players.add(member)
         return players
 
-    async def IsTraitor(self, user: discord.Member) -> bool:
-        if not self.IsPlayer(user):
+    async def IsTraitor(
+        self, user: discord.Member, include_banished: bool = False
+    ) -> bool:
+        if not await self.IsPlayer(user, include_out_players=include_banished):
             return False
         traitors_channel = await self.TraitorsInstructionsChannel()
         if traitors_channel.permissions_for(user).view_channel:
             return True
         return False
 
-    async def GetTraitors(self) -> set[discord.Member]:
-        return {player for player in self.GetPlayers() if await self.IsTraitor(player)}
-
-    async def GetFaithful(self) -> set[discord.Member]:
+    async def GetTraitors(
+        self, include_out_players: bool = False
+    ) -> set[discord.Member]:
         return {
-            player for player in self.GetPlayers() if not await self.IsTraitor(player)
+            player
+            for player in await self.GetPlayers(include_out_players)
+            if await self.IsTraitor(player, include_banished=include_out_players)
+        }
+
+    async def GetFaithful(
+        self, include_out_players: bool = False
+    ) -> set[discord.Member]:
+        return {
+            player
+            for player in await self.GetPlayers(include_out_players)
+            if not await self.IsTraitor(player, include_banished=include_out_players)
+        }
+
+    async def GetBanished(self) -> set[discord.Member]:
+        return {
+            player
+            for player in await self.GetPlayers(include_out_players=True)
+            if not await self.IsBanished(player)
+        }
+
+    async def GetDead(self) -> set[discord.Member]:
+        return {
+            player
+            for player in await self.GetPlayers(include_out_players=True)
+            if not await self.IsDead(player)
         }

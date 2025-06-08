@@ -1,6 +1,8 @@
 import discord
 from discord import app_commands
 import constants
+import contextlib
+import tempfile
 from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
@@ -9,6 +11,22 @@ import random
 import base64
 import binascii
 import json
+from datetime import datetime
+import os
+import io
+
+
+@contextlib.contextmanager
+def maybe_in_mem_file(file_name, content):
+    try:
+        file_path = os.path.join("/saved_games", file_name)
+        with open(file_path, "w") as f:
+            f.write(content)
+        with open(file_path, "rb") as f:
+            yield discord.File(f)
+    except Exception:
+        f = io.StringIO(content)
+        yield discord.File(f, filename=file_name)
 
 
 def SetupCommands(
@@ -126,13 +144,10 @@ def SetupCommands(
             for channel in client.get_guild(guild_id).text_channels:
                 if channel.name != constants.kControlsChannelName:
                     await channel.delete()
-            banished_role = discord.utils.get(
-                guild.roles, name=constants.kBanishedRoleName
-            )
-            if banished_role:
-                for player in utils.GetPlayers():
-                    # if banished_role in player.roles:
-                    await player.remove_roles(banished_role)
+            for role in [await utils.DeadRole(), await utils.BanishedRole()]:
+                if role:
+                    for player in await utils.GetPlayers(include_out_players=True):
+                        await player.remove_roles(role)
 
         private_channel_permissions = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -217,7 +232,7 @@ def SetupCommands(
             if random.random() < probability_of_min
             else min_num_traitors + 1
         )
-        players = utils.GetPlayers()
+        players = await utils.GetPlayers(include_out_players=True)
         if len(players) < min_num_traitors + (0 if probability_of_min >= 1 else 1):
             await ctx.response.send_message(
                 embed=utils.Error(
@@ -236,7 +251,7 @@ def SetupCommands(
         if not traitors_instructions or not traitors_chat:
             return
 
-        traitors = random.sample(list(utils.GetPlayers()), num_traitors)
+        traitors = random.sample(list(await utils.GetPlayers()), num_traitors)
         for traitor in traitors:
             await utils.AddTraitor(traitor)
             await traitor.send(
@@ -284,7 +299,7 @@ def SetupCommands(
         description="Save the traitors as an encoded string",
         guild=discord.Object(id=guild_id),
     )
-    async def SaveGame(interaction: discord.Interaction):
+    async def SaveGame(interaction: discord.Interaction, name: str = ""):
         def encode(players: dict) -> str:
             string = json.dumps(players)
             return base64.urlsafe_b64encode(string.encode()).decode()
@@ -294,32 +309,40 @@ def SetupCommands(
                 member.id: member.name for member in await utils.GetFaithful()
             },
             "traitor": {member.id: member.name for member in await utils.GetTraitors()},
+            "banished": {
+                member.id: member.name for member in await utils.GetBanished()
+            },
+            "dead": {member.id: member.name for member in await utils.GetDead()},
         }
 
         saved_game = encode(players)
+        date = datetime.now().strftime("%m-%d-%Y")
+        num_players = len(await utils.GetPlayers(include_out_players=True))
+        file_name = f"{name if name else "traitors"}_{date}_{num_players}-players.dat"
 
         description = (
             f"A game has been saved with the following players:"
-            f"\n* {"\n* ".join([ player.name for player in utils.GetPlayers()])}.\n\n"
-            "Copy the following text and paste into the `/load_game` command to load game."
+            f"\n* {"\n* ".join([ player.name for player in await utils.GetPlayers()])}.\n\n"
+            "Attach the file to the `/load_game` command to load game."
         )
-
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="Game saved!",
-                description=description + " A copy has been DM'd to you as well.",
-                color=discord.Color.green(),
+        with maybe_in_mem_file(file_name, content=saved_game) as file:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="Game saved!",
+                    description=description + " A copy has been DM'd to you as well.",
+                    color=discord.Color.green(),
+                ),
+                file=file,
             )
-        )
-        await interaction.channel.send(f"```{saved_game}```")
-        await interaction.user.send(
-            embed=discord.Embed(
-                title="Game saved!",
-                description=description,
-                color=discord.Color.green(),
+        with maybe_in_mem_file(file_name, content=saved_game) as file:
+            await interaction.user.send(
+                embed=discord.Embed(
+                    title="Game saved!",
+                    description=description,
+                    color=discord.Color.green(),
+                ),
+                file=file,
             )
-        )
-        await interaction.user.send(f"```{saved_game}```")
 
     @tree.command(
         name="load_game",
@@ -327,27 +350,29 @@ def SetupCommands(
         guild=discord.Object(id=guild_id),
     )
     @app_commands.describe(
-        new_player_traitor_probability="Probability that new players (players not in the game on save) will be added as traitors."
+        new_player_traitor_probability="Probability that new players (players not in the game on save) will be added as traitors.",
     )
     async def LoadGame(
         interaction: discord.Interaction,
-        saved_game: str,
+        saved_game: discord.Attachment,
         new_player_traitor_probability: float = 0.22,
     ):
         if not await utils.CheckControlChannel(interaction):
             return
+        await interaction.response.defer()
         await InitializeImpl(interaction.channel)
 
-        async def decode(encoded_text) -> dict[str, dict[int, str]]:
+        async def decode(saved_game) -> dict[str, dict[int, str]]:
             """Decodes the encoded string back to a list of member IDs."""
             try:
+                encoded_text = (await saved_game.read()).decode("utf-8")
                 return json.loads(
                     base64.urlsafe_b64decode(encoded_text.strip("`").encode()).decode()
                 )
             except (binascii.Error, UnicodeDecodeError) as e:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     embed=utils.Error(
-                        "Unable to decode saved game. make sure you copied it correctly."
+                        "Unable to decode saved game. The file may be corrupted."
                     )
                 )
                 return None
@@ -385,7 +410,7 @@ def SetupCommands(
                     color=discord.Color.purple(),
                 )
             )
-        current_players = utils.GetPlayers()
+        current_players = await utils.GetPlayers(include_out_players=True)
 
         new_players = current_players - old_players
         description = ""
@@ -413,7 +438,7 @@ def SetupCommands(
             view = View()
             view.add_item(add_player)
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=discord.Embed(
                     title="New Players",
                     description=(
@@ -439,7 +464,7 @@ def SetupCommands(
 
             add_player.callback = Callback
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=discord.Embed(
                 title="Game loaded!",
                 description=description,
@@ -575,7 +600,8 @@ def SetupCommands(
         await ctx.response.defer()
         await InitializeImpl(ctx.channel, reset=True)
         failed = []
-        for player in utils.GetPlayers():
+        players = await utils.GetPlayers(include_out_players=True)
+        for player in players:
             dm_button = Button(style=discord.ButtonStyle.blurple)
             dm_button.label = "Click Me!"
             dm_button.callback = lambda interaction: DmButtonCallback(
@@ -611,7 +637,7 @@ def SetupCommands(
         view = View()
         view.add_item(
             ConfirmButton(
-                utils.GetPlayers(),
+                players,
                 label="Click Me!",
                 click_response="Great work! Hold tight while everyone completes this.",
                 final_announcement=discord.Embed(
