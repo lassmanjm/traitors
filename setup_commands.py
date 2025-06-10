@@ -16,6 +16,7 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 import pickle
+from game import Game
 
 
 class PlayerStatus(Enum):
@@ -39,23 +40,23 @@ def maybe_in_mem_file(file_name, content):
         file_path = os.path.join("/saved_games", file_name)
         with open(file_path, "wb") as f:
             f.write(content)
-        with open(file_path, "rb") as f:
-            yield discord.File(f)
+        f = io.BytesIO(content)
+        yield discord.File(f, filename=file_name)
     except Exception:
         f = io.BytesIO(content)
         yield discord.File(f, filename=file_name)
 
 
-def SetupCommands(
-    tree: app_commands.CommandTree, guild_id: int, client: discord.Client
-):
-    utils = ClaudiaUtils(client, guild_id)
+def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game: Game):
+    utils = ClaudiaUtils(client, game.guild_id)
 
     @tree.command(
-        name="test", description="Test the bot", guild=discord.Object(id=guild_id)
+        name="test",
+        description="Test the bot",
+        guild=discord.Object(id=game.guild_id),
     )
-    async def Test(ctx: discord.Interaction):
-        if not await utils.CheckControlChannel(ctx):
+    async def test(ctx: discord.Interaction):
+        if not await game.in_controls_channel(ctx):
             return
         await ctx.response.send_message(
             embed=discord.Embed(
@@ -68,255 +69,89 @@ def SetupCommands(
     @tree.command(
         name="add_to_controls",
         description="Add player to the controls channel",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
-    async def AddToControls(ctx: discord.Interaction, player: discord.User):
-        if not await utils.CheckControlChannel(ctx) or not await utils.CheckOwner(ctx):
+    async def add_to_controls(ctx: discord.Interaction, player: discord.User):
+        if not await game.in_controls_channel(ctx) or not await game.check_owner(ctx):
             return
-        await ctx.channel.set_permissions(player, view_channel=True)
+        await (await game.controls_channel).set_permissions(player, view_channel=True)
         await ctx.response.send_message(f"{player.name} added!")
         return
 
     @tree.command(
         name="remove_from_controls",
         description="Remove a player from the controls channel",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
-    async def RemoveFromControls(ctx: discord.Interaction, player: discord.User):
-        if not await utils.CheckControlChannel(ctx) or not await utils.CheckOwner(ctx):
+    async def remove_from_controls(ctx: discord.Interaction, player: discord.User):
+        if not await game.in_controls_channel(ctx) or not await game.check_owner(ctx):
             return
-        guild = utils.Guild()
-        await ctx.channel.set_permissions(player, view_channel=False)
+        await (await game.controls_channel).set_permissions(player, view_channel=False)
         await ctx.response.send_message(f"{player.name} removed!")
         return
-
-    class ConfirmButton(Button):
-        def __init__(
-            self,
-            traitors: set[discord.Member],
-            label: str,
-            click_response: str,
-            final_announcement: discord.Embed,
-        ):
-            super().__init__(label=label, style=discord.ButtonStyle.blurple)
-            self.traitors_left = traitors
-            self.lock = asyncio.Lock()
-            self.click_response = click_response
-            self.final_announcement = final_announcement
-
-        async def callback(self, interaction: discord.Interaction):
-            async with self.lock:
-                if interaction.user not in self.traitors_left:
-                    await interaction.response.defer()
-                    return
-
-                await interaction.response.send_message(
-                    self.click_response, ephemeral=True
-                )
-                self.traitors_left.discard(interaction.user)
-                if len(self.traitors_left) == 0:
-                    announcements_channel = await utils.AnnouncementsChannel()
-                    await announcements_channel.send(embed=self.final_announcement)
-                    self.disabled = True
-                    await interaction.message.edit(view=self.view)
-
-    async def ConfirmTraitors(traitors: set[discord.Member]):
-        view = View()
-        view.add_item(
-            ConfirmButton(
-                traitors,
-                label="I swear",
-                click_response=(
-                    "And with that, you are now a traitor. The game will "
-                    "commence when all of the traitors have taken the oath."
-                ),
-                final_announcement=discord.Embed(
-                    title="The traitors have been selected",
-                    description="Let the game begin.",
-                    color=discord.Color.purple(),
-                ),
-            )
-        )
-        instructions_channel = await utils.TraitorsInstructionsChannel()
-        await instructions_channel.send(
-            embed=discord.Embed(
-                title="Before you don your cloak, you must take the Traitor's Oath.",
-                description=(
-                    "🔪 Do you commit to lying and deceiving your way through this game?\n\n"
-                    "🔪 Do you swear to murder your fellow players throughout the game?\n\n"
-                    "🔪 Do you vow to keep your identity and the identity of your fellow traitors a secret?"
-                ),
-                color=discord.Color.dark_magenta(),
-            ),
-            view=view,
-        )
-
-    async def InitializeImpl(
-        output_channel: discord.TextChannel,
-        reset: bool = True,
-    ):
-        guild = utils.Guild()
-
-        if reset:
-            for channel in client.get_guild(guild_id).text_channels:
-                if channel.name != constants.kControlsChannelName:
-                    await channel.delete()
-            for role in [await utils.DeadRole(), await utils.BanishedRole()]:
-                if role:
-                    for player in await utils.GetPlayers(include_out_players=True):
-                        await player.remove_roles(role)
-
-        private_channel_permissions = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            guild.me: discord.PermissionOverwrite(view_channel=True),
-        }
-
-        # Create general channel
-        general_channel = utils.GeneralChannel()
-        if not general_channel:
-            general_channel = await guild.create_text_channel(
-                constants.kGeneralChannelName
-            )
-
-        # Create controls channel
-        controls_channel = utils.ControlsChannel()
-        if not controls_channel:
-            controls_channel = await guild.create_text_channel(
-                constants.kControlsChannelName, overwrites=private_channel_permissions
-            )
-
-        # Create read only announcements channel that only Claudia can send messages to
-        read_only = {
-            guild.default_role: discord.PermissionOverwrite(
-                send_messages=False,
-                create_public_threads=False,
-                create_private_threads=False,
-            ),
-            guild.me: discord.PermissionOverwrite(send_messages=True),
-        }
-        announcements_channel = await utils.AnnouncementsChannel(send_error=False)
-        if not announcements_channel:
-            announcements_channel = await guild.create_text_channel(
-                constants.kAnnouncementsChannelName, overwrites=read_only
-            )
-
-        # Create private instructions channel for only traitors (initially with just Claudia and the owner)
-        traitors_instructions_channel = await utils.TraitorsInstructionsChannel(
-            send_error=False
-        )
-        if not traitors_instructions_channel:
-            traitors_instructions_channel = await guild.create_text_channel(
-                constants.kTraitorsInstructionsChannelName,
-                overwrites=private_channel_permissions,
-            )
-
-        traitors_chat_channel = await utils.TraitorsChatChannel(send_error=False)
-        if not traitors_chat_channel:
-            traitors_chat_channel = await guild.create_text_channel(
-                constants.kTraitorsChatChannelName,
-                overwrites=private_channel_permissions,
-            )
 
     @tree.command(
         name="initialize",
         description="Reset the traitors server",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
-    async def Initialize(
+    async def initialize(
         ctx: discord.Interaction,
         reset: bool = False,
     ):
-        if reset and not await utils.CheckControlChannel(ctx):
+        if reset and not await game.in_controls_channel(ctx):
             return False
         await ctx.response.send_message("Initializing server...")
-        await InitializeImpl(ctx.channel, reset)
+        await game.initialize(reset)
         await ctx.edit_original_response(content="Server initialized!")
 
     @tree.command(
         name="new_game",
         description="Start a new game",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
-    async def NewGame(
+    async def new_game(
         ctx: discord.Interaction,
         min_num_traitors: int = 2,
         probability_of_min: float = 0.8,
     ):
-        if not await utils.CheckControlChannel(ctx):
-            return False
+        if not await game.in_controls_channel(ctx):
+            return
+        await ctx.response.defer()
         num_traitors = (
             min_num_traitors
             if random.random() < probability_of_min
             else min_num_traitors + 1
         )
-        players = await utils.GetPlayers(include_out_players=True)
-        if len(players) < min_num_traitors + (0 if probability_of_min >= 1 else 1):
-            await ctx.response.send_message(
+        num_players = await game.num_players(only_active_players=False)
+        if num_players < min_num_traitors + (0 if probability_of_min >= 1 else 1):
+            await ctx.followup.send(
                 embed=utils.Error(
                     "Possible number of traitors higher than number of players"
                 )
             )
             return
-        await ctx.response.send_message(
+        await ctx.followup.send(
             f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors..."
         )
+        await game.initialize(reset=True)
+        traitors = await game.assign_traitors(num_traitors)
+        await game.confirm_traitors()
 
-        await InitializeImpl(ctx.channel)
-
-        traitors_instructions = await utils.TraitorsInstructionsChannel()
-        traitors_chat = await utils.TraitorsChatChannel()
-        if not traitors_instructions or not traitors_chat:
-            return
-
-        traitors = random.sample(list(await utils.GetPlayers()), num_traitors)
-        for traitor in traitors:
-            await utils.AddTraitor(traitor)
-            await traitor.send(
-                embed=discord.Embed(
-                    title=f"Congratulations, you have been selected to be a traitor!",
-                    description=(
-                        "The traitors private channels are now available to you. You can "
-                        "communicate with your fellow traitors using the private chat channel:\n\n"
-                        f"<#{traitors_chat.id}>"
-                    ),
-                    color=discord.Color.purple(),
-                )
-            )
-        if not await utils.CheckNumTraitors({min_num_traitors, min_num_traitors + 1}):
-            return
-        await traitors_chat.send(
-            embed=discord.Embed(
-                title=f"Welcome traitors",
-                description=(
-                    "You may reveal yourself to your fellow traitors here. "
-                    "When you are ready, visit the traitors instructions channel "
-                    "to take the Traitor's Oath and begin the game.\n\n"
-                    f"<#{traitors_instructions.id}>"
-                ),
-                color=discord.Color.purple(),
-            )
-        )
-        for player in await utils.GetFaithful():
-            await player.send(
-                embed=discord.Embed(
-                    title="The game has begun!",
-                    description="You are a **faithful**.",
-                    color=discord.Color.purple(),
-                )
-            )
         await ctx.channel.send(
             embed=discord.Embed(
                 title="New game started successfully!", color=discord.Color.green()
             )
         )
-        await ConfirmTraitors(await utils.GetTraitors())
 
     class AttachmentView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
 
         @discord.ui.button(
-            label="Load Game", style=discord.ButtonStyle.primary, custom_id="load_game"
+            label="Load Game",
+            style=discord.ButtonStyle.primary,
+            custom_id="load_game_button",
         )
         async def process_attachment(
             self, interaction: discord.Interaction, button: discord.ui.Button
@@ -327,67 +162,15 @@ def SetupCommands(
     @tree.command(
         name="save_game",
         description="Save the traitors as an encoded string",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
-    async def SaveGame(interaction: discord.Interaction, name: str = ""):
-        def encode(players: dict) -> str:
-            pickled_data = pickle.dumps(players)
-            return base64.urlsafe_b64encode(pickled_data)
-
-        players = [
-            Player(
-                id=member.id,
-                name=member.name,
-                display_name=member.display_name,
-                is_traitor=await utils.IsTraitor(member, include_banished=True),
-                status=(
-                    PlayerStatus.DEAD
-                    if await utils.IsDead(member)
-                    else (
-                        PlayerStatus.BANISHED
-                        if await utils.IsBanished(member)
-                        else PlayerStatus.ACTIVE
-                    )
-                ),
-            )
-            for member in await utils.GetPlayers(include_out_players=True)
-        ]
-
-        saved_game = encode(players)
-        date = datetime.now().strftime("%m-%d-%Y")
-        num_players = len(await utils.GetPlayers(include_out_players=True))
-        file_name = f"{name if name else "traitors"}_{date}_{num_players}-players.dat"
-
-        description = (
-            f"A game has been saved with the following players:"
-            f"\n* {"\n* ".join([ f"{player.display_name} ({player.name})" for player in await utils.GetPlayers()])}.\n\n"
-            "Attach the file to the `/load_game` command to load game."
-        )
-        with maybe_in_mem_file(file_name, content=saved_game) as file:
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="Game saved!",
-                    description=description + " A copy has been DM'd to you as well.",
-                    color=discord.Color.green(),
-                ),
-                file=file,
-                view=AttachmentView(),
-            )
-        with maybe_in_mem_file(file_name, content=saved_game) as file:
-            await interaction.user.send(
-                embed=discord.Embed(
-                    title="Game saved!",
-                    description=description,
-                    color=discord.Color.green(),
-                ),
-                file=file,
-                view=AttachmentView(),
-            )
+    async def save_game(ctx: discord.Interaction, name: str = ""):
+        await game.save_game(ctx, name)
 
     @tree.command(
-        name="load_game",
-        description="Load the traitors from an encoded string",
-        guild=discord.Object(id=guild_id),
+        name="load_game_from_file",
+        description="Load a game from an attached save game file.",
+        guild=discord.Object(id=game.guild_id),
     )
     @app_commands.describe(
         new_player_traitor_probability="Probability that new players (players not in the game on save) will be added as traitors.",
@@ -400,7 +183,7 @@ def SetupCommands(
         if not await utils.CheckControlChannel(interaction):
             return
         await interaction.response.defer()
-        await InitializeImpl(interaction.channel)
+        await initialize_impl(interaction.channel)
 
         async def decode(saved_game: discord.Attachment) -> list[Player]:
             """Decodes the encoded string back to a list of member IDs."""
@@ -516,7 +299,7 @@ def SetupCommands(
     @tree.command(
         name="check_traitors",
         description="Check that the number of traitors is as expected",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
     async def CheckTraitors(ctx: discord.Interaction, min_expected: int):
         if not await utils.CheckNumTraitors({min_expected, min_expected + 1}):
@@ -585,7 +368,7 @@ def SetupCommands(
     @tree.command(
         name="add_player",
         description="Add player to game, possibly making them a traitor",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
     # Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
     # of .8, this gives the same probability for any new players.
@@ -633,13 +416,13 @@ def SetupCommands(
     @tree.command(
         name="demo",
         description="Demonstrate the DM and private traitors channel for all players.",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
     async def Demo(ctx: discord.Interaction):
         if not await utils.CheckControlChannel(ctx):
             return
         await ctx.response.defer()
-        await InitializeImpl(ctx.channel, reset=True)
+        await initialize_impl(ctx.channel, reset=True)
         failed = []
         players = await utils.GetPlayers(include_out_players=True)
         for player in players:
@@ -696,7 +479,7 @@ def SetupCommands(
     @tree.command(
         name="clear_all_traitors",
         description="Remove all traitors",
-        guild=discord.Object(id=guild_id),
+        guild=discord.Object(id=game.guild_id),
     )
     async def ClearAllTraitors(ctx: discord.Interaction):
         await utils.ClearTraitors()

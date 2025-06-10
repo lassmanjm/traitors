@@ -10,11 +10,14 @@ import random
 import chat_gpt_claudia
 import os
 from absl import flags
+from game import Game
 
 FLAGS = flags.FLAGS
 
 
-def GameControls(tree: app_commands.CommandTree, guild_id: int, client: discord.Client):
+def GameControls(
+    tree: app_commands.CommandTree, guild_id: int, client: discord.Client, game: Game
+):
     utils = ClaudiaUtils(client, guild_id)
 
     @tree.command(
