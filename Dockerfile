@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # base python image for custom image
-FROM python:3.12.8-slim
+FROM python:3.12-alpine3.20
 
 # create working directory and install pip dependencies
 WORKDIR /app
