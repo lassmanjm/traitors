@@ -12,7 +12,7 @@ from enum import Enum
 import random
 import asyncio
 from discord.ui import Button, View
-
+import re
 
 # TODO: Decide whether to use this on every function
 # def requires_init(func):
@@ -48,14 +48,14 @@ class DiscordError(discord.Embed):
 class ConfirmButton(Button):
     def __init__(
         self,
-        game: Game,
+        discord_interface: DiscordInterface,
         traitors: set[discord.Member],
         label: str,
         click_response: str,
         final_announcement: discord.Embed,
     ):
         super().__init__(label=label, style=discord.ButtonStyle.blurple)
-        self.game = game
+        self.discord_interface = discord_interface
         self.traitors_left = traitors
         self.lock = asyncio.Lock()
         self.click_response = click_response
@@ -70,17 +70,19 @@ class ConfirmButton(Button):
             await interaction.response.send_message(self.click_response, ephemeral=True)
             self.traitors_left.discard(interaction.user)
             if len(self.traitors_left) == 0:
-                announcements_channel = await self.game.announcements_channel
+                announcements_channel = (
+                    await self.discord_interface.announcements_channel
+                )
                 await announcements_channel.send(embed=self.final_announcement)
                 self.disabled = True
                 await interaction.message.edit(view=self.view)
 
 
 class LoadGameView(discord.ui.View):
-    def __init__(self, message: discord.Message, game: Game):
+    def __init__(self, message: discord.Message, discord_interface: DiscordInterface):
         super().__init__(timeout=None)
         self.message = message
-        self.game = game
+        self.discord_interface = discord_interface
 
     @discord.ui.button(
         label="Load game",
@@ -91,16 +93,22 @@ class LoadGameView(discord.ui.View):
         self, ctx: discord.Interaction, button: discord.ui.Button
     ):
         # TODO: make this better/more informational
-        await ctx.response.send_message("Loading game...", ephemeral=True)
-        await self.game.load_game(ctx, self.message.attachments[0])
+        await self.discord_interface.load_game(
+            ctx, await self.message.attachments[0].read()
+        )
 
 
 class NewPlayerEmbed(discord.Embed):
-    def __init__(self, game: Game, players: Iterable[Player], probabilty: float):
+    def __init__(
+        self,
+        discord_interface: DiscordInterface,
+        players: Iterable[Player],
+        probabilty: float,
+    ):
         super().__init__(
             title="New players added to game",
             description=(
-                f"{game._display_players(players)} added with {probabilty:.1f} "
+                f"{discord_interface._display_players(players)} added with {probabilty:.1f} "
                 "probability of being a traitor."
             ),
         )
@@ -108,10 +116,13 @@ class NewPlayerEmbed(discord.Embed):
 
 class NewProbabilityModal(discord.ui.Modal):
     def __init__(
-        self, game: Game, players: Iterable[Player], title: str = "New probability"
+        self,
+        discord_interface: DiscordInterface,
+        players: Iterable[Player],
+        title: str = "New probability",
     ):
         super().__init__(title=title)
-        self.game = game
+        self.discord_interface = discord_interface
         self.players = players
 
     text_input = discord.ui.TextInput(
@@ -136,9 +147,9 @@ class NewProbabilityModal(discord.ui.Modal):
                 )
             )
             return
-        await self.game.add_players(self.players, probability)
+        await self.discord_interface.add_players(self.players, probability)
         await interaction.response.send_message(
-            embed=NewPlayerEmbed(self.game, self.players, probability),
+            embed=NewPlayerEmbed(self.discord_interface, self.players, probability),
             ephemeral=True,
         )
         self.stop()
@@ -146,14 +157,16 @@ class NewProbabilityModal(discord.ui.Modal):
 
 # TODO: use button to change probability
 class NewPlayersView(discord.ui.View):
-    def __init__(self, game: Game, new_players: Iterable[Player]):
+    def __init__(
+        self, discord_interface: DiscordInterface, new_players: Iterable[Player]
+    ):
         super().__init__()
 
         # Default probablity is 0.22, as assuming 10 initial players,
         # with 2-3 traitors and min probability of .8, this gives
         # the same probability for any new players.
         self.traitor_probability: float = 0.22
-        self.game = game
+        self.discord_interface = discord_interface
         self.players = new_players
 
     async def _disable_buttons(self, ctx: discord.Interaction):
@@ -164,7 +177,6 @@ class NewPlayersView(discord.ui.View):
                 child.disabled = True
                 await ctx.response.edit_message(view=self)
 
-
     @discord.ui.button(
         label="Yes",
         style=discord.ButtonStyle.green,
@@ -172,9 +184,11 @@ class NewPlayersView(discord.ui.View):
         custom_id="yes_buton",
     )
     async def yes(self, ctx: discord.Interaction, button: discord.ui.Button):
-        await self.game.add_players(self.players, self.traitor_probability)
+        await self.discord_interface.add_players(self.players, self.traitor_probability)
         await ctx.response.send_message(
-            embed=NewPlayerEmbed(self.game, self.players, self.traitor_probability)
+            embed=NewPlayerEmbed(
+                self.discord_interface, self.players, self.traitor_probability
+            )
         )
         await self._disable_buttons(ctx)
         button.disabled = True
@@ -197,7 +211,9 @@ class NewPlayersView(discord.ui.View):
     async def change_probability(
         self, ctx: discord.Interaction, button: discord.ui.Button
     ):
-        await ctx.response.send_modal(NewProbabilityModal(self.game, self.players))
+        await ctx.response.send_modal(
+            NewProbabilityModal(self.discord_interface, self.players)
+        )
         # TODO: disable all buttons
 
     # @discord.ui.select(
@@ -227,10 +243,11 @@ class NewPlayersView(discord.ui.View):
     #             pass
 
 
-class Game:
-    def __init__(self, client: discord.Client, guild_id: int):
+class DiscordInterface:
+    def __init__(self, client: discord.Client, guild_id: int, saved_game_path: str):
         self.client = client
         self.guild_id = guild_id
+        self.saved_game_path = saved_game_path
         self.private_channel_permissions = {
             self.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             self.guild.me: discord.PermissionOverwrite(view_channel=True),
@@ -443,9 +460,19 @@ class Game:
         return not (await self._is_dead(player) or await self._is_banished(player))
 
     # ------------------------------[ Actions ]------------------------------
-    async def _send_error(self, description: str):
+    async def send_error(self, description: str):
         await (await self.controls_channel).send(
-            embed=discord.Embed(description=description)
+            embed=DiscordError(description=description)
+        )
+
+    async def send_controls_message(
+        self,
+        title: str,
+        description: str = "",
+        color: discord.Color = discord.Color.green(),
+    ):
+        await (await self.controls_channel).send(
+            embed=discord.Embed(title=title, description=description, color=color)
         )
 
     async def kill(self, victims: list[discord.User]) -> None:
@@ -522,7 +549,7 @@ class Game:
         view = View()
         view.add_item(
             ConfirmButton(
-                game=self,
+                discord_interface=self,
                 traitors=traitors,
                 label="I swear",
                 click_response=(
@@ -566,7 +593,7 @@ class Game:
             num_instructions_members not in valid_nums
             or num_chat_members not in valid_nums
         ):
-            await self._send_error(DiscordError("Incorrect number of traitors!"))
+            await self.send_error(DiscordError("Incorrect number of traitors!"))
             return False
         return True
 
@@ -592,7 +619,7 @@ class Game:
         for player in players:
             player_member = self._player_member(player)
             if not player_member:
-                await self._send_error(
+                await self.send_error(
                     description=(
                         f"Player {player.display_name} ({player.name}) "
                         "could not be added to game. Not found in guild."
@@ -653,6 +680,8 @@ class Game:
 
     async def save_game(self, ctx: discord.Interaction, name: str):
         await ctx.response.defer()
+        name = re.sub(r"[ .]", "-", name)
+        name = re.sub(r"[^a-zA-Z0-9-]", "", name)
         players = [
             (await self._player_data(player))
             for player in await self._get_players(only_active_players=False)
@@ -665,19 +694,18 @@ class Game:
         file_name = f"{name if name else "saved-game"}_{date}_{num_players}-players.dat"
 
         try:
-            file_path = os.path.join("/saved_games", file_name)
+            file_path = os.path.join(self.saved_game_path, file_name)
             with open(file_path, "wb") as f:
                 f.write(saved_game)
             to_file = (
-                "**Note**: Game saved to /saved_games. Can be accessed through /load_game "
+                f"**Note**: Game saved to {self.saved_game_path}. Can be accessed through /load_game "
                 "command, or by providing this attachment to the /load_game_from_file command."
             )
         except Exception:
             to_file = (
-                "**Note**: Game could not be saved to /saved_games. Must be loaded by "
+                f"**Note**: Game could not be saved to {self.saved_game_path}. Must be loaded by "
                 "providing this attachment to the /load_game_from_file command."
             )
-            to_file = "**Note**: Game could not be saved to /saved_games. Must be loaded with /load_game_from_file command."
 
         description = (
             f"A game has been saved with the following players:"
@@ -712,20 +740,20 @@ class Game:
             view=LoadGameView(message, self),
         )
 
-    # TODO: Test errors
     async def load_game(
         self,
         ctx: discord.Interaction,
-        attachment: discord.Attachment,
+        saved_game: str,
         new_player_traitor_probability: float = 0.22,
     ):
-        async def decode(saved_game: discord.Attachment) -> list[Player]:
+        await ctx.response.defer()
+
+        async def decode(encoded_text: str) -> list[Player]:
             """Decodes the encoded string back to a list of member IDs."""
-            encoded_text = await saved_game.read()
             try:
                 return pickle.loads(base64.urlsafe_b64decode(encoded_text))
             except UnicodeDecodeError as e:
-                await ctx.channel.send(
+                await ctx.followup.send(
                     embed=DiscordError(
                         f"Unable to decode saved game. The file may be corrupted.\n\n{e}"
                     )
@@ -733,7 +761,7 @@ class Game:
                 return None
 
         await self.initialize(reset=True)
-        players = await decode(attachment)
+        players = await decode(saved_game)
         if not players:
             return
         players_dict = {player.id: player for player in players}
@@ -810,7 +838,7 @@ class Game:
             description=description,
             color=discord.Color.green(),
         )
-        await ctx.channel.send(embed=loaded_embed)
+        await ctx.followup.send(embed=loaded_embed)
         if not await self.in_controls_channel(ctx):
             (await self.controls_channel).send(embed=loaded_embed)
 
@@ -830,6 +858,13 @@ class Game:
                         )
 
     async def refresh_load_game_views(self, limit):
+        if limit == 0:
+            print("Skipping button refreshes")
+            return
+
+        print(
+            f"Checking channel history for button refreshes. Limit {limit} messages...\n"
+        )
         controls = await self.controls_channel
         async for message in controls.history(limit=limit):
             await self.maybe_refresh_message(message)

@@ -1,6 +1,6 @@
 import discord
+import regex
 from discord import app_commands
-from game import constants
 import contextlib
 from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
@@ -16,7 +16,7 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 import pickle
-from game import Game
+from interface import DiscordInterface
 
 
 class PlayerStatus(Enum):
@@ -47,16 +47,20 @@ def maybe_in_mem_file(file_name, content):
         yield discord.File(f, filename=file_name)
 
 
-def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game: Game):
-    utils = ClaudiaUtils(client, game.guild_id)
+def setup_commands(
+    tree: app_commands.CommandTree,
+    client: discord.Client,
+    discord_interface: DiscordInterface,
+):
+    utils = ClaudiaUtils(client, discord_interface.guild_id)
 
     @tree.command(
         name="test",
         description="Test the bot",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def test(ctx: discord.Interaction):
-        if not await game.in_controls_channel(ctx):
+        if not await discord_interface.in_controls_channel(ctx):
             return
         await ctx.response.send_message(
             embed=discord.Embed(
@@ -69,53 +73,61 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="add_to_controls",
         description="Add player to the controls channel",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def add_to_controls(ctx: discord.Interaction, player: discord.User):
-        if not await game.in_controls_channel(ctx) or not await game.check_owner(ctx):
+        if not await discord_interface.in_controls_channel(
+            ctx
+        ) or not await discord_interface.check_owner(ctx):
             return
-        await (await game.controls_channel).set_permissions(player, view_channel=True)
+        await (await discord_interface.controls_channel).set_permissions(
+            player, view_channel=True
+        )
         await ctx.response.send_message(f"{player.name} added!")
         return
 
     @tree.command(
         name="remove_from_controls",
         description="Remove a player from the controls channel",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def remove_from_controls(ctx: discord.Interaction, player: discord.User):
-        if not await game.in_controls_channel(ctx) or not await game.check_owner(ctx):
+        if not await discord_interface.in_controls_channel(
+            ctx
+        ) or not await discord_interface.check_owner(ctx):
             return
-        await (await game.controls_channel).set_permissions(player, view_channel=False)
+        await (await discord_interface.controls_channel).set_permissions(
+            player, view_channel=False
+        )
         await ctx.response.send_message(f"{player.name} removed!")
         return
 
     @tree.command(
         name="initialize",
         description="Reset the traitors server",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def initialize(
         ctx: discord.Interaction,
         reset: bool = False,
     ):
-        if reset and not await game.in_controls_channel(ctx):
+        if reset and not await discord_interface.in_controls_channel(ctx):
             return False
         await ctx.response.send_message("Initializing server...")
-        await game.initialize(reset)
+        await discord_interface.initialize(reset)
         await ctx.edit_original_response(content="Server initialized!")
 
     @tree.command(
         name="new_game",
         description="Start a new game",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def new_game(
         ctx: discord.Interaction,
         min_num_traitors: int = 2,
         probability_of_min: float = 0.8,
     ):
-        if not await game.in_controls_channel(ctx):
+        if not await discord_interface.in_controls_channel(ctx):
             return
         await ctx.response.defer()
         num_traitors = (
@@ -123,7 +135,7 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
             if random.random() < probability_of_min
             else min_num_traitors + 1
         )
-        num_players = await game.num_players(only_active_players=False)
+        num_players = await discord_interface.num_players(only_active_players=False)
         if num_players < min_num_traitors + (0 if probability_of_min >= 1 else 1):
             await ctx.followup.send(
                 embed=utils.Error(
@@ -134,9 +146,9 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
         await ctx.followup.send(
             f"Starting game with {num2words(min_num_traitors)} or {num2words(min_num_traitors + 1)} traitors..."
         )
-        await game.initialize(reset=True)
-        traitors = await game.assign_traitors(num_traitors)
-        await game.confirm_traitors()
+        await discord_interface.initialize(reset=True)
+        traitors = await discord_interface.assign_traitors(num_traitors)
+        await discord_interface.confirm_traitors()
 
         await ctx.channel.send(
             embed=discord.Embed(
@@ -162,15 +174,50 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="save_game",
         description="Save the traitors as an encoded string",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def save_game(ctx: discord.Interaction, name: str = ""):
-        await game.save_game(ctx, name)
+        await discord_interface.save_game(ctx, name)
+
+    async def get_saved_game_choices(ctx: discord.Interaction, current: str):
+        choices: list[app_commands.Choice] = []
+        for file in os.listdir(discord_interface.saved_game_path):
+            if not current.lower() in file.lower():
+                continue
+            match = regex.fullmatch(r"(.*)_(\d{2}-\d{2}-\d{4})_(\d+)-players.dat", file)
+            if not match:
+                continue
+            choices.append(
+                app_commands.Choice(
+                    name=(
+                        f"{match.group(3)} Players - "
+                        f"{datetime.strptime(match.group(2), "%m-%d-%Y").strftime("%A, %B %d %Y")}"
+                        f"{"" if match.group(1)=="saved_game" else ": " + match.group(1)}"
+                    ),
+                    value=file,
+                )
+            )
+        return choices
+
+    @tree.command(
+        name="load_game",
+        description=f"Load a game from {discord_interface.saved_game_path}",
+        guild=discord.Object(id=discord_interface.guild_id),
+    )
+    @app_commands.autocomplete(saved_game=get_saved_game_choices)
+    async def load_game(
+        ctx: discord.Interaction,
+        saved_game: str,
+    ):
+        with open(
+            os.path.join(discord_interface.saved_game_path, saved_game), "rb"
+        ) as f:
+            await discord_interface.load_game(ctx, f.read())
 
     @tree.command(
         name="load_game_from_file",
         description="Load a game from an attached save game file.",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     @app_commands.describe(
         new_player_traitor_probability="Probability that new players (players not in the game on save) will be added as traitors.",
@@ -299,7 +346,7 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="check_traitors",
         description="Check that the number of traitors is as expected",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def CheckTraitors(ctx: discord.Interaction, min_expected: int):
         if not await utils.CheckNumTraitors({min_expected, min_expected + 1}):
@@ -368,7 +415,7 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="add_player",
         description="Add player to game, possibly making them a traitor",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     # Default probablity is .22, as assuming 10 initial players, with 2-3 traitors and min probability
     # of .8, this gives the same probability for any new players.
@@ -416,7 +463,7 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="demo",
         description="Demonstrate the DM and private traitors channel for all players.",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def Demo(ctx: discord.Interaction):
         if not await utils.CheckControlChannel(ctx):
@@ -479,7 +526,7 @@ def setup_commands(tree: app_commands.CommandTree, client: discord.Client, game:
     @tree.command(
         name="clear_all_traitors",
         description="Remove all traitors",
-        guild=discord.Object(id=game.guild_id),
+        guild=discord.Object(id=discord_interface.guild_id),
     )
     async def ClearAllTraitors(ctx: discord.Interaction):
         await utils.ClearTraitors()

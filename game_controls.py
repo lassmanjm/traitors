@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from game import constants
+from interface import constants
 from claudia_utils import ClaudiaUtils
 from discord.ui import Select, View, Button
 import asyncio
@@ -10,13 +10,16 @@ import random
 import chat_gpt_claudia
 import os
 from absl import flags
-from game import Game
+from interface import DiscordInterface
 
 FLAGS = flags.FLAGS
 
 
 def GameControls(
-    tree: app_commands.CommandTree, guild_id: int, client: discord.Client, game: Game
+    tree: app_commands.CommandTree,
+    guild_id: int,
+    client: discord.Client,
+    game: DiscordInterface,
 ):
     utils = ClaudiaUtils(client, guild_id)
 

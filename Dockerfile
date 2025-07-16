@@ -10,5 +10,4 @@ RUN pip3 install -r requirements.txt
 
 COPY . .
 
-# run the flask server
-CMD [ "python3", "claudia_bot.py"]
+CMD [ "python3", "claudia_bot.py", "--saved_game_path", "/saved_games"]

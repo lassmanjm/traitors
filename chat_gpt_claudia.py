@@ -1,14 +1,14 @@
 from openai import OpenAI
 import os
 from absl import flags
-from game import constants
+from interface import constants
 
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string(
     "openai_model",
     "",
-    "The model type to use in the OpenAI api calls.",
+    "The model type to use in the OpenAI pi calls.",
 )
 flags.DEFINE_string(
     "openai_api_key",
