@@ -37,3 +37,6 @@ Replacing the server_id, bot_token, and openai_key (optional to enable ChatGPT f
 1) Create a python3 virtual environment (must be python3.12 or newer)
 1) install the requirements.txt with pip
 1) Run the claudia_bot python script: `python3 claudia_bot.py --bot_token="${TRAITORS_BOT_TOKEN}" --server_id="${TRAITORS_SERVER_ID}"`
+
+## Game controls
+Control the game through use of slash commands (type `/` and select a command), to start a new game, initiate a murder or banishment, and more!
